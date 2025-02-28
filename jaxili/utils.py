@@ -9,6 +9,7 @@ Other functions allow to check the validity of the input data.
 from typing import Any, Callable, Sequence, Union
 
 import jax.numpy as jnp
+import jax_dataloader as jdl
 import numpy as np
 import torch
 import torch.utils.data as data
@@ -42,7 +43,7 @@ def numpy_collate(batch):
 
 
 def create_data_loader(
-    *datasets: Sequence[data.Dataset],
+    *datasets: Sequence[Union[data.Dataset, jdl.DataLoader]],
     train: Union[bool, Sequence[bool]] = True,
     batch_size: int = 128,
     num_workers: int = 4,
@@ -69,16 +70,21 @@ def create_data_loader(
     if not isinstance(train, (list, tuple)):
         train = [train for _ in datasets]
     for dataset, is_train in zip(datasets, train):
-        loader = data.DataLoader(
-            dataset,
-            batch_size=batch_size,
-            shuffle=is_train,
-            drop_last=is_train,
-            collate_fn=numpy_collate,
-            num_workers=num_workers,
-            persistent_workers=is_train,
-            generator=torch.Generator().manual_seed(seed),
-        )
+        if isinstance(dataset, data.Dataset):
+            loader = data.DataLoader(
+                dataset,
+                batch_size=batch_size,
+                shuffle=is_train,
+                drop_last=is_train,
+                collate_fn=numpy_collate,
+                num_workers=num_workers,
+                persistent_workers=is_train,
+                generator=torch.Generator().manual_seed(seed),
+            )
+        elif isinstance(dataset, jdl.ArrayDataset):
+            loader = jdl.DataLoader(dataset, 'jax', batch_size=batch_size, shuffle=is_train, drop_last=is_train)
+        else:
+            raise TypeError("The datasets should be generated with torch or `jax_dataloader`.")
         loaders.append(loader)
     return loaders
 

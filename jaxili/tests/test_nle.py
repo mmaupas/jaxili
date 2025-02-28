@@ -117,36 +117,37 @@ def test_build_neural_network():
     assert inference._transformation is not None, "The transformation is None."
     assert inference._embedding_net is not None, "The embedding net is None."
 
-    shift = jnp.mean(inference._train_dataset.theta, axis=0)
-    scale = jnp.std(inference._train_dataset.theta, axis=0)
+    shift = jnp.mean(inference._train_dataset[:][0], axis=0)
+    scale = jnp.std(inference._train_dataset[:][0], axis=0)
 
-    standardized_theta = (inference._train_dataset.theta - shift) / scale
+    standardized_theta = (inference._train_dataset[:][0] - shift) / scale
 
     params = model.init(jax.random.PRNGKey(0), x_train, theta_train)
 
-    test_theta = model.apply(params, inference._train_dataset.theta, method="embedding")
+    test_theta = model.apply(params, inference._train_dataset[:][0], method="embedding")
 
     npt.assert_allclose(standardized_theta, test_theta, rtol=1e-5, atol=1e-5)
 
-    test_x = model.apply(params, inference._train_dataset.x, method="standardize")
-    shift_x = jnp.mean(inference._train_dataset.x, axis=0)
-    scale_x = jnp.std(inference._train_dataset.x, axis=0)
-    standardized_x = (inference._train_dataset.x - shift_x) / scale_x
+    test_x = model.apply(params, inference._train_dataset[:][1], method="standardize")
+    shift_x = jnp.mean(inference._train_dataset[:][1], axis=0)
+    scale_x = jnp.std(inference._train_dataset[:][1], axis=0)
+    standardized_x = (inference._train_dataset[:][1] - shift_x) / scale_x
     npt.assert_allclose(standardized_x, test_x, rtol=1e-5, atol=1e-5)
 
     log_prob = model.apply(
         params,
-        inference._train_dataset.x,
-        inference._train_dataset.theta,
+        inference._train_dataset[:][1],
+        inference._train_dataset[:][0],
         method="log_prob",
     )
     assert log_prob.shape[0] == len(
         inference._train_dataset
     ), "The shape of the output of log_prob method is wrong."
 
+    
     samples = model.apply(
         params,
-        inference._train_dataset.theta[0],
+        inference._train_dataset[:][0][0],
         num_samples=10_000,
         key=jax.random.PRNGKey(0),
         method="sample",
