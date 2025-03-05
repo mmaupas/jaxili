@@ -19,7 +19,7 @@ print(sys.path)
 project = "JaxILI"
 copyright = "2025, Sacha Guerrini"
 author = "Sacha Guerrini"
-release = "0.1"
+release = "0.1.2"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -34,6 +34,8 @@ extensions = [
     "nbsphinx",
     "numpydoc",
 ]
+
+autodoc_mock_imports = ["tf_keras"]
 
 templates_path = ["_templates"]
 exclude_patterns = ["__version__.py", "__init__.py"]

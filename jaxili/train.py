@@ -21,7 +21,7 @@ from flax.training.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
 from tqdm import tqdm
 
-import jaxili
+from jaxili.model import NDENetwork
 from jaxili.inventory.func_dict import jax_nn_dict, jaxili_loss_dict, jaxili_nn_dict
 from jaxili.utils import handle_non_serializable
 
@@ -47,7 +47,7 @@ class TrainerModule:
 
     def __init__(
         self,
-        model_class: jaxili.model.NDENetwork,
+        model_class: NDENetwork,
         model_hparams: Dict[str, Any],
         optimizer_hparams: Dict[str, Any],
         loss_fn: Callable,
@@ -637,7 +637,7 @@ class TrainerModule:
 
     @classmethod
     def load_from_checkpoints(
-        cls, model_class: jaxili.model.NDENetwork, checkpoint: str, exmp_input: Any
+        cls, model_class: NDENetwork, checkpoint: str, exmp_input: Any
     ) -> Any:
         """
         Create a Trainer object with same hyperparameters and loaded model from a checkpoint directory.
