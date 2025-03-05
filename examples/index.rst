@@ -7,5 +7,4 @@ Examples
 
    getting_started
    nle_quickstart
-   two_moons
    

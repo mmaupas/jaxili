@@ -14,11 +14,9 @@ import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
 import numpyro.distributions as dist
-import torch.utils.data as data
 from jaxtyping import Array, Float, PyTree
 
 import jaxili
-from jaxili.inference.npe import NDEDataset
 from jaxili.loss import loss_nll_nle
 from jaxili.model import (
     ConditionalMAF,
@@ -163,7 +161,6 @@ class NLE:
         x: Array,
         train_test_split: Iterable[float] = [0.7, 0.2, 0.1],
         key: Optional[PyTree] = None,
-        dataset_type: str = 'jax'
     ):
         """
         Store parameters and simulation outputs to use them for later training.
@@ -181,11 +178,7 @@ class NLE:
             Should be of length 2 or 3. A length 2 list will not generate a test set. Default is [0.7, 0.2, 0.1].
         key : PyTree, optional
             Key to use for the random permutation of the dataset. Default is None.
-        dataset_type : str, optional
-            Type of the dataset to use. Can be 'jax' or 'torch'. Default is 'jax'.
         """
-
-        assert dataset_type in ['jax', 'torch'], "dataset_type should be 'jax' or 'torch'."
         # Verify theta and x typing and size of the dataset
         theta, x, num_sims = validate_theta_x(theta, x)
         if self.verbose:
@@ -225,20 +218,13 @@ class NLE:
             test_idx = index_permutation[
                 int((train_fraction + val_fraction) * num_sims) :
             ]
-        if dataset_type == 'torch':
-            self.set_dataset(NDEDataset(theta[train_idx], x[train_idx]), type="train")
-            self.set_dataset(NDEDataset(theta[val_idx], x[val_idx]), type="val")
-            self.set_dataset(
-                NDEDataset(theta[test_idx], x[test_idx]) if is_test_set else None,
-                type="test",
-            )
-        else:
-            self.set_dataset(jdl.ArrayDataset(theta[train_idx], x[train_idx]), type="train")
-            self.set_dataset(jdl.ArrayDataset(theta[val_idx], x[val_idx]), type="val")
-            self.set_dataset(
-                jdl.ArrayDataset(theta[test_idx], x[test_idx]) if is_test_set else None,
-                type="test",
-            )
+
+        self.set_dataset(jdl.ArrayDataset(theta[train_idx], x[train_idx]), type="train")
+        self.set_dataset(jdl.ArrayDataset(theta[val_idx], x[val_idx]), type="val")
+        self.set_dataset(
+            jdl.ArrayDataset(theta[test_idx], x[test_idx]) if is_test_set else None,
+            type="test",
+        )
 
         if self.verbose:
             print(f"[!] Dataset split into training, validation and test sets.")
@@ -256,10 +242,6 @@ class NLE:
         ----------
         batch_size : int
             Batch size to use for the DataLoader. Default is 128.
-        num_workers : int
-            Number of workers to use for the DataLoader. Default is 4.
-        seed : int
-            Seed to use for the DataLoader. Default is 42.
         """
         try:
             self._train_dataset
@@ -290,7 +272,7 @@ class NLE:
                     self._val_dataset,
                     self._test_dataset,
                     train=train,
-                    **kwargs,
+                    batch_size=batch_size
                 )
             )
 
@@ -438,8 +420,10 @@ class NLE:
             nde_class="NLE",
         )
 
-        self.trainer.config.update({'nde_hparams': self._model_hparams})
-        self.trainer.config.update({'transformation_hparams': self._transformation_hparams})
+        self.trainer.config.update({"nde_hparams": self._model_hparams})
+        self.trainer.config.update(
+            {"transformation_hparams": self._transformation_hparams}
+        )
         self.trainer.init_logger(logger_params)
 
     def train(

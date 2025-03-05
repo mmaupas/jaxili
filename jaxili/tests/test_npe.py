@@ -130,7 +130,9 @@ def test_build_neural_network():
 
     npt.assert_allclose(standardized_theta, test_theta, rtol=1e-5, atol=1e-5)
 
-    test_embedding = model.apply(params, inference._train_dataset[:][1], method="embedding")
+    test_embedding = model.apply(
+        params, inference._train_dataset[:][1], method="embedding"
+    )
     shift_x = jnp.mean(inference._train_dataset[:][1], axis=0)
     scale_x = jnp.std(inference._train_dataset[:][1], axis=0)
     standardized_x = (inference._train_dataset[:][1] - shift_x) / scale_x

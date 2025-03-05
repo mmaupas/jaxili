@@ -11,43 +11,12 @@ from typing import Any, Callable, Sequence, Union
 import jax.numpy as jnp
 import jax_dataloader as jdl
 import numpy as np
-import torch
-import torch.utils.data as data
-
-
-def numpy_collate(batch):
-    """
-    Collect data in DataLoader in a numpy array format.
-
-    The data stored in `torch.utils.data.DataLoader` can take various format. This function ensures that the output is complient with `numpy`.
-
-    Parameters
-    ----------
-    batch : list
-        List of samples to collate.
-
-    Returns
-    -------
-    np.ndarray
-        Collated data.
-    """
-    if isinstance(batch[0], np.ndarray):
-        return np.stack(batch)
-    elif isinstance(batch[0], (tuple, list)):
-        transposed = zip(*batch)
-        return [numpy_collate(samples) for samples in transposed]
-    elif isinstance(batch[0], jnp.ndarray):
-        return jnp.stack(batch)
-    else:
-        return np.array(batch)
 
 
 def create_data_loader(
-    *datasets: Sequence[Union[data.Dataset, jdl.DataLoader]],
+    *datasets: Sequence[jdl.DataLoader],
     train: Union[bool, Sequence[bool]] = True,
-    batch_size: int = 128,
-    num_workers: int = 4,
-    seed: int = 42,
+    batch_size: int = 128
 ):
     """
     Create data loaders from a set of datasets.
@@ -58,33 +27,23 @@ def create_data_loader(
     train : Sequence indicating which datasets are used for training and which not.
     If single bool, the same value is used for all datasets.
     batch_size : Batch size to use in the data loaders.
-    num_workers : Number of workers for each datasets.
-    seed : Seed to initalize the workers and shuffling with
 
     Returns
     -------
-    list[torch.utils.data.DataLoader]
+    list[jdl.DataLoader]
         List of data loaders.
     """
     loaders = []
     if not isinstance(train, (list, tuple)):
         train = [train for _ in datasets]
     for dataset, is_train in zip(datasets, train):
-        if isinstance(dataset, data.Dataset):
-            loader = data.DataLoader(
-                dataset,
-                batch_size=batch_size,
-                shuffle=is_train,
-                drop_last=is_train,
-                collate_fn=numpy_collate,
-                num_workers=num_workers,
-                persistent_workers=is_train,
-                generator=torch.Generator().manual_seed(seed),
-            )
-        elif isinstance(dataset, jdl.ArrayDataset):
-            loader = jdl.DataLoader(dataset, 'jax', batch_size=batch_size, shuffle=is_train, drop_last=is_train)
-        else:
-            raise TypeError("The datasets should be generated with torch or `jax_dataloader`.")
+        loader = jdl.DataLoader(
+            dataset,
+            "jax",
+            batch_size=batch_size,
+            shuffle=is_train,
+            drop_last=is_train,
+        )
         loaders.append(loader)
     return loaders
 

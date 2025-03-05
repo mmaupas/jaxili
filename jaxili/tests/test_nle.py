@@ -144,7 +144,6 @@ def test_build_neural_network():
         inference._train_dataset
     ), "The shape of the output of log_prob method is wrong."
 
-    
     samples = model.apply(
         params,
         inference._train_dataset[:][0][0],
