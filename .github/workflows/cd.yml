@@ -6,7 +6,7 @@ on:
       - main
 image:
   name: pandoc
-  entrypoint: [""/bin/sh, "-c"]
+  entrypoint: ["/bin/sh", "-c"]
 
 jobs:
   docs:
