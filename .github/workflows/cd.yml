@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - main
-image:
-  name: pandoc
-  entrypoint: ["/bin/sh", "-c"]
 
 jobs:
   docs:
@@ -29,6 +26,7 @@ jobs:
         run: python -m pip install ".[docs]"
 
       - name: Build API documentation
+        uses: docker://pandoc/core:3.5
         run: |
           sphinx-apidoc -Mfeo docs/source jaxili
           sphinx-build docs/source docs/build
