@@ -36,6 +36,7 @@ docs = [
     "sphinx",
     "sphinx-book-theme",
     "nbsphinx",
+    "pandoc",
     "tf-keras"
 ]
 
