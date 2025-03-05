@@ -35,8 +35,6 @@ extensions = [
     "numpydoc",
 ]
 
-autodoc_mock_imports = ["tf_keras"]
-
 templates_path = ["_templates"]
 exclude_patterns = ["__version__.py", "__init__.py"]
 
