@@ -31,6 +31,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "myst_parser",
+    "nbsphinx",
     "numpydoc",
 ]
 

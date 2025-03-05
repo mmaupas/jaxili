@@ -14,11 +14,9 @@ import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
 import numpyro.distributions as dist
-import torch.utils.data as data
 from jaxtyping import Array, Float, PyTree
 
 import jaxili
-from jaxili.inference.npe import NDEDataset
 from jaxili.loss import loss_nll_nle
 from jaxili.model import (
     ConditionalMAF,
@@ -178,6 +176,8 @@ class NLE:
         train_test_split : Iterable[float], optional
             Fractions to split the dataset into training, validation and test sets.
             Should be of length 2 or 3. A length 2 list will not generate a test set. Default is [0.7, 0.2, 0.1].
+        key : PyTree, optional
+            Key to use for the random permutation of the dataset. Default is None.
         """
         # Verify theta and x typing and size of the dataset
         theta, x, num_sims = validate_theta_x(theta, x)
@@ -185,8 +185,8 @@ class NLE:
             print(f"[!] Inputs are valid.")
             print(f"[!] Appending {num_sims} simulations to the dataset.")
 
-        self._dim_params = x.shape[1]  # The distribution of the data is learned.
-        self._dim_cond = theta.shape[1]  # Conditionned on the parameters
+        self._dim_params = x.shape[1]
+        self._dim_cond = theta.shape[1]
         self._num_sims = num_sims
 
         # Split the dataset into training, validation and test sets
@@ -218,10 +218,11 @@ class NLE:
             test_idx = index_permutation[
                 int((train_fraction + val_fraction) * num_sims) :
             ]
-        self.set_dataset(NDEDataset(theta[train_idx], x[train_idx]), type="train")
-        self.set_dataset(NDEDataset(theta[val_idx], x[val_idx]), type="val")
+
+        self.set_dataset(jdl.ArrayDataset(theta[train_idx], x[train_idx]), type="train")
+        self.set_dataset(jdl.ArrayDataset(theta[val_idx], x[val_idx]), type="val")
         self.set_dataset(
-            NDEDataset(theta[test_idx], x[test_idx]) if is_test_set else None,
+            jdl.ArrayDataset(theta[test_idx], x[test_idx]) if is_test_set else None,
             type="test",
         )
 
@@ -241,10 +242,6 @@ class NLE:
         ----------
         batch_size : int
             Batch size to use for the DataLoader. Default is 128.
-        num_workers : int
-            Number of workers to use for the DataLoader. Default is 4.
-        seed : int
-            Seed to use for the DataLoader. Default is 42.
         """
         try:
             self._train_dataset
@@ -275,7 +272,7 @@ class NLE:
                     self._val_dataset,
                     self._test_dataset,
                     train=train,
-                    **kwargs,
+                    batch_size=batch_size,
                 )
             )
 
@@ -322,8 +319,8 @@ class NLE:
 
         # Check if z-score is required for theta.
         if z_score_theta:
-            shift = jnp.mean(self._train_dataset.theta, axis=0)
-            scale = jnp.std(self._train_dataset.theta, axis=0)
+            shift = jnp.mean(self._train_dataset[:][0], axis=0)
+            scale = jnp.std(self._train_dataset[:][0], axis=0)
             standardizer = Standardizer(shift, scale)
         else:
             standardizer = Identity()
@@ -335,8 +332,10 @@ class NLE:
         scale = jnp.ones(self._dim_params)
 
         if z_score_x:
-            shift = jnp.mean(self._train_dataset.x, axis=0)
-            scale = jnp.std(self._train_dataset.x, axis=0)
+            shift = jnp.mean(self._train_dataset[:][1], axis=0)
+            scale = jnp.std(self._train_dataset[:][1], axis=0)
+
+        self._transformation_hparams = {"shift": shift, "scale": scale}
 
         self._transformation = distrax.ScalarAffine(scale=scale, shift=shift)
 
@@ -420,6 +419,12 @@ class NLE:
             check_val_every_epoch=check_val_every_epoch,
             nde_class="NLE",
         )
+
+        self.trainer.config.update({"nde_hparams": self._model_hparams})
+        self.trainer.config.update(
+            {"transformation_hparams": self._transformation_hparams}
+        )
+        self.trainer.init_logger(logger_params)
 
     def train(
         self,

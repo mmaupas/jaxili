@@ -17,7 +17,7 @@ from flax import linen as nn
 from jax.scipy.stats import multivariate_normal
 from jaxtyping import Array
 
-tfp = tfp.experimental.substrates.jax
+tfp = tfp.substrates.jax
 tfb = tfp.bijectors
 tfd = tfp.distributions
 

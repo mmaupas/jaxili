@@ -34,7 +34,7 @@ Then create an inference object, add the simulations and train:
 
 ```python
 inference = NPE()
-inference.append_simulations(theta, x)
+inference = inference.append_simulations(theta, x)
 
 learning_rate = ... #Choose your learning rate
 num_epochs = ... #Choose the number of epochs
