@@ -272,7 +272,7 @@ class NLE:
                     self._val_dataset,
                     self._test_dataset,
                     train=train,
-                    batch_size=batch_size
+                    batch_size=batch_size,
                 )
             )
 

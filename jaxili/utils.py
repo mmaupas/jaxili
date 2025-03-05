@@ -16,7 +16,7 @@ import numpy as np
 def create_data_loader(
     *datasets: Sequence[jdl.DataLoader],
     train: Union[bool, Sequence[bool]] = True,
-    batch_size: int = 128
+    batch_size: int = 128,
 ):
     """
     Create data loaders from a set of datasets.
