@@ -6,6 +6,7 @@ These notes relate the changes between different `JaxILI` releases.
 
 * Remove `torch.utils.data.DataLoader` causing kernel crash. Replaced with DataLoaders from `jax_dataloader`.
 * Add example notebooks to the API documentation.
+* Dependencies of `JaxILI` have been updated to avoid conflicts between `jax` and `tensorflow` with `nvidia` packages.
 
 ## 0.1.1
 
