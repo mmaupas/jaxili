@@ -7,13 +7,6 @@ This module contains classes that implement compressors used in JaxILI.
 from typing import Any, Callable
 
 import flax.linen as nn
-import jax
-import jax.numpy as jnp
-import tensorflow_probability as tfp
-
-tfp = tfp.experimental.substrates.jax
-tfb = tfp.bijectors
-tfd = tfp.distributions
 
 
 class MLPCompressor(nn.Module):
