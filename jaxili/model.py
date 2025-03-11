@@ -613,7 +613,10 @@ class ConditionalMADE(nn.Module):
         for l in range(L):
             low = masks[l].min()  # Get the lowest index in the previous layer
             size = self.hidden_dims[l]  # The size of the current hidden layer
-            masks[l + 1] = np.random.randint(low, D - 1, size=size)
+            if D > 1:
+                masks[l + 1] = np.random.randint(low, D - 1, size=size)
+            else:
+                masks[l + 1] = np.zeros(size)
 
         # Order of the output layer is the same as the input layer
         masks[L + 1] = masks[0]
