@@ -415,6 +415,11 @@ class ConditionalRealNVP(NDENetwork):
         tfd.Distributions
             Normalizing Flow transporting a multidimensional Gaussian to a more complex distribution.
         """
+        if self.n_in == 1:
+            raise ValueError(
+                "Flows can't be used to learn a one dimensional distribution. Consider using the `MixtureDensityNetwork`."
+            )
+
         bijector_fn = partial(
             AffineCoupling, layers=self.layers, activation=self.activation
         )
@@ -832,6 +837,10 @@ class ConditionalMAF(NDENetwork):
     def setup(self):
         """Set the network creating the MAF layers."""
         np.random.seed(self.seed)
+        if self.n_in == 1:
+            raise ValueError(
+                "Flows can't be used to learn a one dimensional distribution. Consider using the `MixtureDensityNetwork`."
+            )
         layer_list = []
         for _ in range(self.n_layers):
             layer_list.append(

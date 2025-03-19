@@ -158,11 +158,9 @@ def test_build_neural_network():
         inference._dim_params,
     ), "The shape of the samples is wrong."
 
-    #Test with an embedding net
+    # Test with an embedding net
     embedding_net = MLPCompressor(
-        hidden_size=[50, 50],
-        activation = jax.nn.relu,
-        output_size = 15
+        hidden_size=[50, 50], activation=jax.nn.relu, output_size=15
     )
 
     model = inference._build_neural_network(embedding_net=embedding_net)

@@ -284,7 +284,7 @@ class NPE:
         z_score_theta: bool = True,
         z_score_x: bool = True,
         embedding_net: nn.Module = Identity(),
-        **kwargs
+        **kwargs,
     ):
         """
         Build the neural network for the density estimator.
@@ -328,7 +328,7 @@ class NPE:
         if z_score_theta:
             shift = jnp.mean(self._train_dataset[:][0], axis=0)
             scale = jnp.std(self._train_dataset[:][0], axis=0)
-            min_std = kwargs.get('min_std', 1e-14)
+            min_std = kwargs.get("min_std", 1e-14)
             scale.at[scale < min_std].set(min_std)
 
         self._transformation_hparams = {"shift": shift, "scale": scale}
@@ -339,7 +339,7 @@ class NPE:
         if z_score_x:
             shift = jnp.mean(self._train_dataset[:][1], axis=0)
             scale = jnp.std(self._train_dataset[:][1], axis=0)
-            min_std = kwargs.get('min_std', 1e-14)
+            min_std = kwargs.get("min_std", 1e-14)
             scale.at[scale < min_std].set(min_std)
             standardizer = Standardizer(shift, scale)
         else:
