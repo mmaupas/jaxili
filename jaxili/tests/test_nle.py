@@ -9,6 +9,7 @@ import sbibm
 
 from jaxili.inference.nle import NLE, default_maf_hparams
 from jaxili.model import ConditionalMAF
+from jaxili.compressor import MLPCompressor
 
 task = sbibm.get_task("slcp")
 simulator = task.get_simulator()
@@ -133,6 +134,49 @@ def test_build_neural_network():
     scale_x = jnp.std(inference._train_dataset[:][1], axis=0)
     standardized_x = (inference._train_dataset[:][1] - shift_x) / scale_x
     npt.assert_allclose(standardized_x, test_x, rtol=1e-5, atol=1e-5)
+
+    log_prob = model.apply(
+        params,
+        inference._train_dataset[:][1],
+        inference._train_dataset[:][0],
+        method="log_prob",
+    )
+    assert log_prob.shape[0] == len(
+        inference._train_dataset
+    ), "The shape of the output of log_prob method is wrong."
+
+    samples = model.apply(
+        params,
+        inference._train_dataset[:][0][0],
+        num_samples=10_000,
+        key=jax.random.PRNGKey(0),
+        method="sample",
+    )
+
+    assert samples.shape == (
+        10_000,
+        inference._dim_params,
+    ), "The shape of the samples is wrong."
+
+    #Test with an embedding net
+    embedding_net = MLPCompressor(
+        hidden_size=[50, 50],
+        activation = jax.nn.relu,
+        output_size = 15
+    )
+
+    model = inference._build_neural_network(embedding_net=embedding_net)
+
+    assert model is not None, "The model is None."
+    assert inference._transformation is not None, "The transformation is None."
+    assert inference._embedding_net is not None, "The embedding net is None."
+
+    params = model.init(jax.random.PRNGKey(0), x_train, theta_train)
+
+    test_embedding = model.apply(
+        params, inference._train_dataset[:][0], method="embedding"
+    )
+    assert test_embedding.shape == (inference._train_dataset[:][0].shape[0], 15)
 
     log_prob = model.apply(
         params,
