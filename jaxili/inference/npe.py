@@ -433,7 +433,7 @@ class NPE:
         self.trainer.config.update(
             {"transformation_hparams": self._transformation_hparams}
         )
-        self.trainer.init_logger(logger_params)
+        self.trainer.write_config(self.trainer.log_dir)
 
     def train(
         self,
@@ -459,6 +459,20 @@ class NPE:
             Maximum number of epochs to train. Default is 2**31 - 1.
         check_val_every_epoch: int, optional
             Frequency at which to check the validation loss. Default is 1.
+        **kwargs : dict, optional
+            Additional keyword arguments for training customization:
+            
+            - optimizer_name (str): Name of the optimizer to use (default: 'adam').
+            - gradient_clip (float): Value for gradient clipping (default: 5.0).
+            - warmup (float): Warmup proportion for learning rate scheduling (default: 0.1).
+            - weight_decay (float): Weight decay (L2 regularization) (default: 0.0).
+            - checkpoint_path (str): Directory to save training checkpoints (default: 'checkpoints/').
+            - log_dir (str or None): Directory for logging (default: None).
+            - logger_type (str): Type of logger to use (default: 'TensorBoard').
+            - seed (int): Random seed for reproducibility (default: 42).
+            - debug (bool): Whether to run in debug mode (default: False).
+            - min_delta (float): Minimum change in validation loss to qualify as improvement (default: 1e-3).
+
 
         Returns
         -------
