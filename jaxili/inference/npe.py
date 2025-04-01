@@ -461,7 +461,7 @@ class NPE:
             Frequency at which to check the validation loss. Default is 1.
         **kwargs : dict, optional
             Additional keyword arguments for training customization:
-            
+
             - optimizer_name (str): Name of the optimizer to use (default: 'adam').
             - gradient_clip (float): Value for gradient clipping (default: 5.0).
             - warmup (float): Warmup proportion for learning rate scheduling (default: 0.1).

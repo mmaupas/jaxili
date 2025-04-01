@@ -161,16 +161,14 @@ class TrainerModule:
         Write the config of the trainer in a JSON file.
         """
         with open(os.path.join(log_dir, "hparams.json"), "w") as f:
-                json.dump(self.config, f, indent=4, default=handle_non_serializable)
+            json.dump(self.config, f, indent=4, default=handle_non_serializable)
 
     def init_checkpointer(self):
         """
         Initialize the checkpointer to save the model.
         """
         options = ocp.CheckpointManagerOptions(max_to_keep=1, create=True)
-        self.checkpoint_manager = ocp.CheckpointManager(
-            self.log_dir, options=options
-        )
+        self.checkpoint_manager = ocp.CheckpointManager(self.log_dir, options=options)
 
     def init_model(self, exmp_input: Any):
         """
@@ -426,7 +424,7 @@ class TrainerModule:
                     )
         # Test best model if possible
         if test_loader is not None:
-            # self.load_model()
+            self.load_model()
             test_metrics = self.eval_model(test_loader, log_prefix="test/")
             self.logger.log_metrics(test_metrics, step=epoch_idx)
             self.save_metrics("test", test_metrics)
@@ -620,7 +618,6 @@ class TrainerModule:
         target = {"params": self.state.params, "batch_stats": self.state.batch_stats}
         self.checkpoint_manager.save(step, args=ocp.args.StandardSave(target))
         self.checkpoint_manager.wait_until_finished()
-
 
     def load_model(self):
         """Load model and batch statistics from the logging directory."""
