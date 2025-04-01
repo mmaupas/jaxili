@@ -323,7 +323,7 @@ class NLE:
             shift = jnp.mean(self._train_dataset[:][0], axis=0)
             scale = jnp.std(self._train_dataset[:][0], axis=0)
             min_std = kwargs.get("min_std", 1e-14)
-            scale.at[scale < min_std].set(min_std)
+            scale = scale.at[scale < min_std].set(min_std)
             standardizer = Standardizer(shift, scale)
         else:
             standardizer = Identity()
@@ -343,7 +343,7 @@ class NLE:
             shift = jnp.mean(self._train_dataset[:][1], axis=0)
             scale = jnp.std(self._train_dataset[:][1], axis=0)
             min_std = kwargs.get("min_std", 1e-14)
-            scale.at[scale < min_std].set(min_std)
+            scale = scale.at[scale < min_std].set(min_std)
 
         self._transformation_hparams = {"shift": shift, "scale": scale}
 
