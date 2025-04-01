@@ -431,6 +431,11 @@ class NLE:
         )
 
         self.trainer.config.update({"nde_hparams": self._model_hparams})
+        #Check if there is an activation function to rename
+        if "activation" in self._model_hparams.keys():
+            self.trainer.config["nde_hparams"]["activation"] = self._model_hparams[
+                "activation"
+            ].__name__
         self.trainer.config.update(
             {"transformation_hparams": self._transformation_hparams}
         )
