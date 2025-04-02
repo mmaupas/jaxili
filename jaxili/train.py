@@ -214,6 +214,7 @@ class TrainerModule:
             "debug": self.debug,
             "check_val_every_epoch": self.check_val_every_epoch,
             "seed": self.seed,
+            "nde_class": self.nde_class
         }
 
         if "activation" in self.model_hparams.keys():

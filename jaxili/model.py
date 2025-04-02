@@ -22,51 +22,6 @@ tfb = tfp.bijectors
 tfd = tfp.distributions
 
 
-class Identity(nn.Module):
-    """Identity transformation."""
-
-    @nn.compact
-    def __call__(self, x):
-        """
-        Forward pass of the identity transformation.
-
-        Parameters
-        ----------
-        x : jnp.Array
-            Input data.
-
-        Returns
-        -------
-        jnp.Array
-            Output data.
-        """
-        return x
-
-
-class Standardizer(nn.Module):
-    """Standardizer transformation."""
-
-    mean: Array
-    std: Array
-
-    @nn.compact
-    def __call__(self, x):
-        """
-        Forward pass of the standardizer transformation. The standardization uses the z-score.
-
-        Parameters
-        ----------
-        x : jnp.Array
-            Input data.
-
-        Returns
-        -------
-        jnp.Array
-            Standardized data.
-        """
-        return (x - self.mean) / self.std
-
-
 class NDENetwork(nn.Module):
     """
     Base class for a Normalizing Flow.

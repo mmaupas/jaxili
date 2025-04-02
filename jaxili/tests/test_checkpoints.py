@@ -10,6 +10,7 @@ from jaxili.utils import create_data_loader
 from jaxili.train import TrainerModule
 from jaxili.model import ConditionalMAF
 from jaxili.loss import loss_nll_npe
+from jaxili.inference import NPE
 
 import numpy.testing as npt
 
@@ -117,5 +118,37 @@ def test_checkpoint_maf():
 
     # Assert that samples_maf_npe and samples_maf_npe_ckpt are equal
     npt.assert_array_equal(samples_maf_npe, samples_maf_npe_ckpt)
+
+    shutil.rmtree(CHECKPOINT_PATH)
+
+def test_checkpoints_npe():
+    inference = NPE()
+
+    inference = inference.append_simulations(theta, x)
+
+    metrics, density_estimator = inference.train(
+        checkpoint_path=CHECKPOINT_PATH,
+        num_epochs=500
+    )
+
+    posterior = inference.build_posterior()
+
+    sample_key = jax.random.PRNGKey(0)
+    samples = posterior.sample(
+        x=obs, num_samples=10000, key=sample_key
+    )
+
+    inference = NPE.load_from_checkpoints(
+        checkpoint=CHECKPOINT_PATH+"/NDE_w_Standardization/version_0/",
+        exmp_input=next(iter(train_loader))
+    )
+
+    posterior = inference.build_posterior()
+
+    samples_ckpt = posterior.sample(
+        x=obs, num_samples=10000, key=sample_key
+    )
+
+    npt.assert_allclose(samples, samples_ckpt, rtol=1e-05, atol=1e-08)
 
     shutil.rmtree(CHECKPOINT_PATH)
