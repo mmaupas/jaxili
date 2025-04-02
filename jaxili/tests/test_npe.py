@@ -163,11 +163,15 @@ def test_build_neural_network():
     ), "The shape of the samples is wrong."
 
     # Test with an embedding net
-    embedding_net = MLPCompressor(
-        hidden_size=[50, 50], activation=jax.nn.relu, output_size=15
-    )
+    embedding_net_hparams = {
+        "hidden_size": [50, 50],
+        "activation": jax.nn.relu,
+        "output_size": 15,
+    }
 
-    model = inference._build_neural_network(embedding_net=embedding_net)
+    model = inference._build_neural_network(
+        embedding_net=MLPCompressor, embedding_hparams=embedding_net_hparams
+    )
 
     assert model is not None, "The model is None."
     assert inference._transformation is not None, "The transformation is None."

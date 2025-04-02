@@ -157,16 +157,12 @@ class TrainerModule:
         self.log_dir = log_dir
 
     def write_config(self, log_dir):
-        """
-        Write the config of the trainer in a JSON file.
-        """
+        """Write the config of the trainer in a JSON file."""
         with open(os.path.join(log_dir, "hparams.json"), "w") as f:
             json.dump(self.config, f, indent=4, default=handle_non_serializable)
 
     def init_checkpointer(self):
-        """
-        Initialize the checkpointer to save the model.
-        """
+        """Initialize the checkpointer to save the model."""
         options = ocp.CheckpointManagerOptions(max_to_keep=1, create=True)
         self.checkpoint_manager = ocp.CheckpointManager(self.log_dir, options=options)
 
@@ -214,7 +210,7 @@ class TrainerModule:
             "debug": self.debug,
             "check_val_every_epoch": self.check_val_every_epoch,
             "seed": self.seed,
-            "nde_class": self.nde_class
+            "nde_class": self.nde_class,
         }
 
         if "activation" in self.model_hparams.keys():

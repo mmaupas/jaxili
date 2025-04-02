@@ -5,6 +5,7 @@ import numpy as np
 import numpy.testing as npt
 
 from jaxili.model import *
+from jaxili.compressor import *
 
 
 def test_conditional_maf():

@@ -8,6 +8,7 @@ import os
 import json
 import re
 import warnings
+import copy
 from typing import Any, Callable, Dict, Iterable, Optional, Union
 
 import distrax
@@ -348,12 +349,14 @@ class NPE:
             standardizer = Standardizer(shift, scale)
         else:
             standardizer = Identity()
-        
-        if embedding_net==Identity:
+
+        if embedding_net == Identity:
             embedding_net = Identity()
         else:
             if embedding_hparams is None:
-                warnings.warn("An embedding net has been specified but not its hyperparameters. Creating an embedding of the instance `Identity` instead.")
+                warnings.warn(
+                    "An embedding net has been specified but not its hyperparameters. Creating an embedding of the instance `Identity` instead."
+                )
                 embedding_net = Identity()
             else:
                 embedding_net = embedding_net(**embedding_hparams)
@@ -417,7 +420,7 @@ class NPE:
                 z_score_theta=z_score_theta,
                 z_score_x=z_score_x,
                 embedding_net=embedding_net,
-                embedding_hparams=embedding_net_hparams
+                embedding_hparams=embedding_net_hparams,
             )
 
         nde_w_std_hparams = {
@@ -444,22 +447,24 @@ class NPE:
             check_val_every_epoch=check_val_every_epoch,
         )
 
-        self.trainer.config.update({"nde_hparams": self._model_hparams})
-        #Check if there is an activation function to rename
+        self.trainer.config.update({"nde_hparams": copy.deepcopy(self._model_hparams)})
+        # Check if there is an activation function to rename
         if "activation" in self._model_hparams.keys():
-            self.trainer.config["nde_hparams"]["activation"] = self._model_hparams[
-                "activation"
-            ].__name__
+            self.trainer.config["nde_hparams"]["activation"] = self.trainer.config[
+                "nde_hparams"
+            ]["activation"].__name__
         self.trainer.config.update(
-            {"transformation_hparams": self._transformation_hparams}
+            {"transformation_hparams": copy.deepcopy(self._transformation_hparams)}
         )
         if embedding_net_hparams is not None:
-            self.trainer.config.update({"embedding_haparams": embedding_net_hparams})
-            #Check if there is an activation function to rename
+            self.trainer.config.update(
+                {"embedding_haparams": copy.deepcopy(embedding_net_hparams)}
+            )
+            # Check if there is an activation function to rename
             if "activation" in embedding_net_hparams.keys():
-                self.trainer.config["embedding_hparams"]["activation"] = embedding_net_hparams[
-                    "activation"
-                ].__name__
+                self.trainer.config["embedding_hparams"]["activation"] = (
+                    self.trainer.config["embedding_hparams"]["activation"].__name__
+                )
         self.trainer.write_config(self.trainer.log_dir)
 
     def train(
@@ -533,7 +538,9 @@ class NPE:
         except AttributeError:
             test_optimizer_hparams = kwargs.get("optimizer_hparams", None)
             if test_optimizer_hparams is not None:
-                warnings.warn("The optimizer hyperparameters specified will not be taken into account. Please refer to the documentation to modify it. Falling back to default optimizer hyperparameters.")
+                warnings.warn(
+                    "The optimizer hyperparameters specified will not be taken into account. Please refer to the documentation to modify it. Falling back to default optimizer hyperparameters."
+                )
             optimizer_hparams = {
                 "lr": learning_rate,
                 "optimizer_name": kwargs.get("optimizer_name", "adam"),
@@ -628,7 +635,7 @@ class NPE:
             An input to the model with which the shapes are inferred.
         embedding_net_class: nn.Module
             Class used to create the embedding net. (Default: Identity)
-        
+
         Returns
         -------
         A NPE object containing a model with the pre-trained weights loaded.
@@ -637,28 +644,30 @@ class NPE:
         assert os.path.isfile(hparams_file), "Could not find hparams file."
         with open(hparams_file, "r") as f:
             hparams = json.load(f)
-        assert(
+        assert (
             hparams["model_class"] == NDE_w_Standardization.__name__
         ), "The model has not been trained with NDE_w_Standardization. Check the checkpoint path is correct."
         hparams.pop("model_class")
 
-        #Check that the embedding class name is correct.
+        # Check that the embedding class name is correct.
         embedding_str = hparams["model_hparams"]["embedding_net"]
         # Find all class names in the layers list
         class_names = re.findall(r"(\w+)\s*\(", embedding_str)
 
         # The first entry is "Sequential", so we take the next two
-        embedding_classes = [class_ for class_ in class_names[1:] if class_!="Array"]  # Skip "Sequential"
-        assert(
+        embedding_classes = [
+            class_ for class_ in class_names[1:] if class_ != "Array"
+        ]  # Skip "Sequential"
+        assert (
             embedding_classes[1] == embedding_net_class.__name__
         ), "The embedding class does not match. Check that you are using the correct architecture."
 
-        #Check if the loss function is correct.
+        # Check if the loss function is correct.
         assert (
             hparams["loss_fn"] in jaxili_loss_dict
         ), "Unknown loss function. Check that the loss function you used comes from `jax.nn`."
         hparams["loss_fn"] = jaxili_loss_dict[hparams["loss_fn"]]
-        #Create the NDE
+        # Create the NDE
         # Extract the nde string
         nde_str = hparams["model_hparams"]["nde"]
 
@@ -671,26 +680,20 @@ class NPE:
         nde_class = jaxili_nn_dict[nde_class_name]
         nde_hparams = hparams["nde_hparams"]
         if "activation" in nde_hparams.keys():
-            nde_hparams["activation"] = jax_nn_dict[
-                nde_hparams["activation"]
-            ]
-        
-        #Create object from the class NPE
+            nde_hparams["activation"] = jax_nn_dict[nde_hparams["activation"]]
+
+        # Create object from the class NPE
         inference = cls(
-            model_class=nde_class,
-            model_hparams=nde_hparams,
-            loss_fn=hparams["loss_fn"]
-        )
-        
-        #Create the NDE
-        inference._nde = nde_class(
-            **nde_hparams
+            model_class=nde_class, model_hparams=nde_hparams, loss_fn=hparams["loss_fn"]
         )
 
-        #Regenerate the embedding net
-        if embedding_classes[0] == 'Identity':
+        # Create the NDE
+        inference._nde = nde_class(**nde_hparams)
+
+        # Regenerate the embedding net
+        if embedding_classes[0] == "Identity":
             standardizer = Identity()
-        elif embedding_classes[0] == 'Standardizer':
+        elif embedding_classes[0] == "Standardizer":
             embedding_net_str = hparams["model_hparams"]["embedding_net"]
 
             # Regular expressions to extract mean and std arrays
@@ -698,39 +701,53 @@ class NPE:
             std_match = re.search(r"std\s*=\s*Array\((\[.*?\])", embedding_net_str)
 
             # Convert extracted values into NumPy arrays
-            mean_array = np.fromstring(mean_match.group(1).strip("[]"), sep=", ") if mean_match else None
-            std_array = np.fromstring(std_match.group(1).strip("[]"), sep=", ") if std_match else None
+            mean_array = (
+                np.fromstring(mean_match.group(1).strip("[]"), sep=", ")
+                if mean_match
+                else None
+            )
+            std_array = (
+                np.fromstring(std_match.group(1).strip("[]"), sep=", ")
+                if std_match
+                else None
+            )
 
             standardizer = Standardizer(mean=mean_array, std=std_array)
         else:
-            raise ValueError("The first class of the embedding net should be `Identity` or `Standardizer`.")
-        
-        if (embedding_classes[1]!="Identity") :
-            if ("embedding_hparams" not in hparams.keys()):
-                raise ValueError("The embedding net hyperparameters can't be find. Check that you are using the correct checkpoint path.")
+            raise ValueError(
+                "The first class of the embedding net should be `Identity` or `Standardizer`."
+            )
+
+        if embedding_classes[1] != "Identity":
+            if "embedding_hparams" not in hparams.keys():
+                raise ValueError(
+                    "The embedding net hyperparameters can't be find. Check that you are using the correct checkpoint path."
+                )
             if "activation" in hparams["embedding_hparams"].keys():
                 hparams["embedding_hparams"]["activation"] = jax_nn_dict[
                     hparams["embedding_hparams"]["activation"]
                 ]
-            embedding_net = embedding_net_class(**hparams["embedding_hparams"]) 
+            embedding_net = embedding_net_class(**hparams["embedding_hparams"])
         else:
             embedding_net = Identity()
 
         inference._embedding_net = nn.Sequential(layers=[standardizer, embedding_net])
 
-        #Regenerate the transformation of the parameters
-        shift_str = hparams['transformation_hparams']['shift']
+        # Regenerate the transformation of the parameters
+        shift_str = hparams["transformation_hparams"]["shift"]
         shift_list = [float(x) for x in shift_str.strip("[]").split()]
 
-        scale_str = hparams['transformation_hparams']['scale']
+        scale_str = hparams["transformation_hparams"]["scale"]
         scale_list = [float(x) for x in scale_str.strip("[]").split()]
 
-        inference._transformation = distrax.ScalarAffine(np.array(shift_list), np.array(scale_list))
+        inference._transformation = distrax.ScalarAffine(
+            np.array(shift_list), np.array(scale_list)
+        )
 
         model_hparams = {
             "nde": inference._nde,
             "embedding_net": inference._embedding_net,
-            "transformation": inference._transformation
+            "transformation": inference._transformation,
         }
 
         if not hparams["logger_params"]:
@@ -742,12 +759,9 @@ class NPE:
             model_class=NDE_w_Standardization,
             exmp_input=exmp_input,
             model_hparams=model_hparams,
-            **hparams
+            **hparams,
         )
 
         inference.trainer.load_model()
 
         return inference
-
-
-

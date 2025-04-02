@@ -9,6 +9,7 @@ from jaxtyping import Array
 
 import flax.linen as nn
 
+
 class Identity(nn.Module):
     """Identity transformation."""
 
