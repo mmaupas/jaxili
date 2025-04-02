@@ -459,7 +459,7 @@ class NLE:
         )
         if embedding_net_hparams is not None:
             self.trainer.config.update(
-                {"embedding_haparams": copy.deepcopy(embedding_net_hparams)}
+                {"embedding_hparams": copy.deepcopy(embedding_net_hparams)}
             )
             # Check if there is an activation function to rename
             if "activation" in embedding_net_hparams.keys():
