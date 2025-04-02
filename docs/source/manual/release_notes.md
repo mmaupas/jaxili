@@ -7,6 +7,7 @@ These notes relate the changes between different `JaxILI` releases.
 * Fix the save of checkpoints with the new `orbax` API.
 * Add functions to load the checkpoints when using the inference class `NPE` or `NLE`.
 * Fixed bugs related to issues when data points have zero or close to zero variance.
+* Moved classes `Identity` and `Standardizer` to `compressor.py`.
 
 ## 0.1.2
 
