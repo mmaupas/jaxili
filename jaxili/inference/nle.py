@@ -775,7 +775,7 @@ class NLE:
             exmp_input=exmp_input,
             model_hparams=model_hparams,
             nde_class="NLE",
-            **hparams
+            **hparams,
         )
 
         inference.trainer.load_model()
