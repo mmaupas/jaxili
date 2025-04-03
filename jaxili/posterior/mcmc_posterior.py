@@ -10,9 +10,10 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
-from flowMC.nfmodel.rqSpline import MaskedCouplingRQSpline
-from flowMC.proposal.MALA import MALA
-from flowMC.Sampler import Sampler
+
+# from flowMC.resource.nf_model.rqSpline import MaskedCouplingRQSpline
+# from flowMC.resource.local_kernel.MALA import MALA
+# from flowMC.Sampler import Sampler
 from jaxtyping import Array
 from numpyro.infer import HMC, MCMC, NUTS
 from numpyro.infer.util import init_to_value
@@ -332,7 +333,10 @@ class MCMCPosterior(NeuralPosterior):
         Array
             The samples from the posterior.
         """
-        num_samples = mcmc_kwargs.get("num_samples", 2000)
+        raise NotImplementedError(
+            "Sampling with FlowMC is not yet implemented in JaxILI."
+        )
+        """ num_samples = mcmc_kwargs.get("num_samples", 2000)
         num_chains = mcmc_kwargs.get("num_chains", 1)
         n_dim = self.prior_distr.sample(sample_shape=(1,), key=key).shape[
             0
@@ -377,7 +381,7 @@ class MCMCPosterior(NeuralPosterior):
             nf_sampler.get_sampler_state().values()
         )
         chains = chains.squeeze()
-        return chains
+        return chains """
 
     def _get_initial_state(self, x: Array, num_chains: int, key: Array, **kwargs):
         """

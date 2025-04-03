@@ -22,51 +22,6 @@ tfb = tfp.bijectors
 tfd = tfp.distributions
 
 
-class Identity(nn.Module):
-    """Identity transformation."""
-
-    @nn.compact
-    def __call__(self, x):
-        """
-        Forward pass of the identity transformation.
-
-        Parameters
-        ----------
-        x : jnp.Array
-            Input data.
-
-        Returns
-        -------
-        jnp.Array
-            Output data.
-        """
-        return x
-
-
-class Standardizer(nn.Module):
-    """Standardizer transformation."""
-
-    mean: Array
-    std: Array
-
-    @nn.compact
-    def __call__(self, x):
-        """
-        Forward pass of the standardizer transformation. The standardization uses the z-score.
-
-        Parameters
-        ----------
-        x : jnp.Array
-            Input data.
-
-        Returns
-        -------
-        jnp.Array
-            Standardized data.
-        """
-        return (x - self.mean) / self.std
-
-
 class NDENetwork(nn.Module):
     """
     Base class for a Normalizing Flow.
@@ -415,6 +370,11 @@ class ConditionalRealNVP(NDENetwork):
         tfd.Distributions
             Normalizing Flow transporting a multidimensional Gaussian to a more complex distribution.
         """
+        if self.n_in == 1:
+            raise ValueError(
+                "Flows can't be used to learn a one dimensional distribution. Consider using the `MixtureDensityNetwork`."
+            )
+
         bijector_fn = partial(
             AffineCoupling, layers=self.layers, activation=self.activation
         )
@@ -613,7 +573,10 @@ class ConditionalMADE(nn.Module):
         for l in range(L):
             low = masks[l].min()  # Get the lowest index in the previous layer
             size = self.hidden_dims[l]  # The size of the current hidden layer
-            masks[l + 1] = np.random.randint(low, D - 1, size=size)
+            if D > 1:
+                masks[l + 1] = np.random.randint(low, D - 1, size=size)
+            else:
+                masks[l + 1] = np.zeros(size)
 
         # Order of the output layer is the same as the input layer
         masks[L + 1] = masks[0]
@@ -829,6 +792,10 @@ class ConditionalMAF(NDENetwork):
     def setup(self):
         """Set the network creating the MAF layers."""
         np.random.seed(self.seed)
+        if self.n_in == 1:
+            raise ValueError(
+                "Flows can't be used to learn a one dimensional distribution. Consider using the `MixtureDensityNetwork`."
+            )
         layer_list = []
         for _ in range(self.n_layers):
             layer_list.append(
