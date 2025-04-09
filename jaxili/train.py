@@ -25,6 +25,8 @@ from jaxili.model import NDENetwork
 from jaxili.inventory.func_dict import jax_nn_dict, jaxili_loss_dict, jaxili_nn_dict
 from jaxili.utils import handle_non_serializable
 
+import datasets as hf_datasets
+
 
 class TrainState(train_state.TrainState):
     """
@@ -445,10 +447,19 @@ class TrainerModule:
             A dictionary of the average training metrics over all batches for logging
         """
         # Train model for one epoch, and log avg loss and accuracy
+        hf_dataset = False
         metrics = defaultdict(float)
         num_train_steps = len(train_loader)
         start_time = time.time()
+        if isinstance(train_loader.dataloader.dataset, hf_datasets.Dataset):
+            if self.check_hf_dataset(train_loader):
+                raise ValueError(
+                    "The Dataset should contain the keys 'theta' and 'x'. Make sure that the dataset has the correct format."
+                )
+            hf_dataset = True
         for batch in train_loader:
+            if hf_dataset:
+                batch = self.handle_hf_dataset(batch)
             self.state, step_metrics = self.train_step(self.state, batch)
             for key in step_metrics:
                 metrics["train/" + key] += step_metrics[key] / num_train_steps
@@ -474,10 +485,19 @@ class TrainerModule:
         Dict[str, Any]
             A dictionary of the evaluation metrics, averaged over data points in the dataset
         """
+        hf_dataset = False
         # Test model on all element of the dataloader and return avg loss
         metrics = defaultdict(float)
         num_elements = 0
+        if isinstance(data_loader.dataloader.dataset, hf_datasets.Dataset):
+            if self.check_hf_dataset(data_loader):
+                raise ValueError(
+                    "The Dataset should contain the keys 'theta' and 'x'. Make sure that the dataset has the correct format."
+                )
+            hf_dataset = True
         for batch in data_loader:
+            if hf_dataset:
+                batch = self.handle_hf_dataset(batch)
             step_metrics = self.eval_step(self.state, batch)
             batch_size = (
                 batch[0].shape[0]
@@ -560,6 +580,22 @@ class TrainerModule:
         """
         with open(os.path.join(self.log_dir, f"metrics/{filename}.json"), "w") as f:
             json.dump(metrics, f, indent=4)
+
+    def check_hf_dataset(self, loader: hf_datasets.Dataset):
+        """
+        Check if the hugging face dataset contains the correct features.
+
+        Parameters
+        ----------
+        loader : hf_datasets.Dataset
+            The HuggingFace data loader that needs to be checked.
+        """
+        dataset_keys = loader.dataloader.dataset.features.keys()
+        return ("theta" not in dataset_keys) or ("x" not in dataset_keys)
+
+    def handle_hf_dataset(self, batch):
+        """Modify the batch obtained from HuggingFace dataset to feed it correctly to the training loop."""
+        return batch["theta"], batch["x"]
 
     def on_training_start(self):
         """

@@ -39,6 +39,8 @@ from jaxili.utils import (
 )
 from jaxili.inventory.func_dict import jaxili_loss_dict, jax_nn_dict, jaxili_nn_dict
 
+import datasets as hf_datasets
+
 default_maf_hparams = {
     "n_layers": 5,
     "layers": [50, 50],
@@ -331,8 +333,18 @@ class NPE:
         scale = jnp.ones(self._dim_params)
 
         if z_score_theta:
-            shift = jnp.mean(self._train_dataset[:][0], axis=0)
-            scale = jnp.std(self._train_dataset[:][0], axis=0)
+            if isinstance(self._train_dataset, jdl.ArrayDataset):
+                train_dataset_theta = self._train_dataset[:][0]
+            elif isinstance(self._train_dataset, hf_datasets.Dataset):
+                train_dataset_theta = jnp.array(self._train_dataset["theta"])
+            else:
+                raise TypeError(
+                    "Only JAX or HuggingFace datasets are currently supported."
+                )
+
+            shift = jnp.mean(train_dataset_theta, axis=0)
+            scale = jnp.std(train_dataset_theta, axis=0)
+            del train_dataset_theta
             min_std = kwargs.get("min_std", 1e-14)
             scale = scale.at[scale < min_std].set(min_std)
 
@@ -342,9 +354,18 @@ class NPE:
 
         # Check if z-score is required for x.
         if z_score_x:
-            shift = jnp.mean(self._train_dataset[:][1], axis=0)
-            scale = jnp.std(self._train_dataset[:][1], axis=0)
+            if isinstance(self._train_dataset, jdl.ArrayDataset):
+                train_dataset_x = self._train_dataset[:][1]
+            elif isinstance(self._train_dataset, hf_datasets.Dataset):
+                train_dataset_x = jnp.array(self._train_dataset["x"])
+            else:
+                raise TypeError(
+                    "Only JAX or HuggingFace datasets are currently supported."
+                )
+            shift = jnp.mean(train_dataset_x, axis=0)
+            scale = jnp.std(train_dataset_x, axis=0)
             min_std = kwargs.get("min_std", 1e-14)
+            del train_dataset_x
             scale = scale.at[scale < min_std].set(min_std)
             standardizer = Standardizer(shift, scale)
         else:
