@@ -240,6 +240,79 @@ class NLE:
                 print(f"[!] Test set: {len(test_idx)} simulations.")
         return self
 
+    def append_simulations_huggingface(
+        self,
+        hf_dataset: hf_datasets.Dataset,
+        train_test_split: Iterable[float] = [0.7, 0.2, 0.1],
+        key: Optional[PyTree] = None
+    ):
+        """
+        Store parameters and simulation outputs to use them for later training.
+
+        Data is stored in a Dataset object from `jax-dataloader`
+
+        Parameters
+        ----------
+        hf_dataset : hf_datasets.Dataset
+            HuggingFace dataset to split and add to the inference object.
+        train_test_split : Iterable[float], optional
+            Fractions to split the dataset into training, validation and test sets.
+            Should be of length 2 or 3. A length 2 list will not generate a test set. Default is [0.7, 0.2, 0.1].
+        key : PyTree, optional
+            Key to use for the random permutation of the dataset. Default is None.
+        """
+        #check if the hugging face dataset has the correct form
+        if ('x' not in hf_dataset.features.keys()) or ('theta' not in hf_dataset.features.keys()):
+            raise ValueError("The hugging face dataset should have columns 'theta' and 'x'")
+    
+        theta, x = hf_dataset['theta'][0], hf_dataset['x'][0]
+        #theta, x, _ = validate_theta_x(theta, x)
+        num_sims = hf_dataset.num_rows
+        if self.verbose:
+            print(f"[!] Inputs are valid.")
+            print(f"[!] Appending {num_sims} simulations to the dataset.")
+        self._dim_params = len(x)
+        self._dim_cond = len(theta)
+        self._num_sims = num_sims
+
+        # Split the dataset into training, validation and test sets
+        is_test_set = len(train_test_split) == 3
+        if is_test_set:
+            train_fraction, val_fraction, test_fraction = train_test_split
+            assert np.isclose(
+                train_fraction + val_fraction + test_fraction, 1.0
+            ), "The sum of the split fractions should be 1."
+        elif len(train_test_split) == 2:
+            train_fraction, val_fraction = train_test_split
+            assert np.isclose(
+                train_fraction + val_fraction, 1.0
+            ), "The sum of the split fractions should be 1."
+        else:
+            raise ValueError("train_test_split should have 2 or 3 elements.")
+        
+        if not is_test_set:
+            test_fraction=0.
+        hf_dataset = hf_dataset.train_test_split(test_size=val_fraction+test_fraction)
+        if is_test_set:
+            temp_dataset = hf_dataset["test"].train_test_split(test_size=val_fraction/(val_fraction+test_fraction))
+            hf_dataset["val"] = temp_dataset["train"]
+            hf_dataset["test"] = temp_dataset["test"]
+            del temp_dataset
+        self.set_dataset(hf_dataset["train"], type="train")
+        self.set_dataset(hf_dataset["test"], type="val")
+        self.set_dataset(
+            hf_dataset["val"] if is_test_set else None,
+            type="test",
+        )
+
+        if self.verbose:
+            print(f"[!] Dataset split into training, validation and test sets.")
+            print(f"[!] Training set: {hf_dataset["train"].num_rows} simulations.")
+            print(f"[!] Validation set: {hf_dataset["test"].num_rows} simulations.")
+            if is_test_set:
+                print(f"[!] Test set: {hf_dataset["val"].num_rows} simulations.")
+        return self
+
     def _create_data_loader(self, **kwargs):
         """
         Create DataLoaders for the training, validation and test datasets. Can only be executed after appending simulations.
