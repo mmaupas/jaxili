@@ -18,10 +18,7 @@ def get_tarp_coverage(
     key: Array,
     num_samples:int = 1000,
     num_simulations: int = 100,
-    mcmc_method: Optional[str] = None,
-    mcmc_kwargs: Optional[Dict[str, Any]] = None,
-    verbose: bool = True,
-    relevant_variables: Optional[Array] = None,
+    **kwargs: Any
     ):
     """
     Compute the TARP coverage of the posterior.
@@ -40,15 +37,17 @@ def get_tarp_coverage(
         The number of samples to draw from the posterior.
     num_simulations : int
         The number of simulations to run. Must be less than or equal to the number of test samples.
-    mcmc_method : str
-        The MCMC method to use for sampling.
-    mcmc_kwargs : dict
-        The keyword arguments to pass to the MCMC method.
-    verbose : bool
-        Whether to print information. (Default: True)
-    relevant_variables : Array
-        The relevant variables to consider. Marginalize out the rest. If None, all variables are considered.
-    
+    **kwargs : Any
+        Additional keyword arguments:
+            mcmc_method : str
+                The MCMC method to use for sampling.
+            mcmc_kwargs : dict
+                The keyword arguments to pass to the MCMC method.
+            verbose : bool
+                Whether to print information. (Default: True)
+            relevant_variables : Array
+                The relevant variables to consider. Marginalize out the rest. If None, all variables are considered.
+                    
     Returns
     -------
     Tuple[Array, Array]
@@ -59,10 +58,7 @@ def get_tarp_coverage(
         raise ValueError("Number of test samples must be equal for x and theta.")
     if(num_simulations > x_test.shape[0]):
         raise ValueError("Number of simulations cannot be greater than the number of test samples.")
-    if relevant_variables is None:
-        relevant_variables = np.arange(theta_test.shape[-1])
-    else:
-        relevant_variables = np.ravel(relevant_variables)
+    relevant_variables = np.ravel(kwargs.get("relevant_variables", np.arange(theta_test.shape[-1])))
     if len(relevant_variables) == 0:
         raise ValueError("List of variables to consider cannot be empty.")
     if np.max(relevant_variables) >= theta_test.shape[-1]:
@@ -70,6 +66,7 @@ def get_tarp_coverage(
     if np.min(relevant_variables) < 0:
         raise ValueError("List of variables to consider cannot be less than 0.")
     relevant_variables = np.unique(np.arange(theta_test.shape[-1])[relevant_variables])
+    verbose = kwargs.get("verbose", True)
     
     if(verbose):
         print("Computing TARP coverage...")
@@ -83,14 +80,13 @@ def get_tarp_coverage(
             num_samples=num_samples,
             key=sample_key, 
             x=t_.reshape(1, -1),
-            mcmc_method=mcmc_method,
-            mcmc_kwargs=mcmc_kwargs,
+            **kwargs,
             )
         samples.append(sample)
     samples = np.stack(samples)
     samples = np.moveaxis(samples, 0, 1)
     
-    if verbose:
+    if verbose and len(relevant_variables) < theta_test.shape[-1]:
         print(f"Marginalizing out {theta_test.shape[-1] - len(relevant_variables)} variables.")
     samples = samples[:, :, relevant_variables]
     theta = theta_test[selection][:, relevant_variables]
