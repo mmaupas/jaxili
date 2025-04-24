@@ -428,8 +428,8 @@ class Compressor:
             print(f"[!] Inputs are valid.")
             print(f"[!] Appending {num_sims} simulations to the dataset.")
 
-        self._dim_params = x.shape[1]
-        self._dim_cond = theta.shape[1]
+        self._dim_sim = x.shape[1]
+        self._dim_params = theta.shape[1]
         self._num_sims = num_sims
 
         # Split the dataset into training, validation and test sets
@@ -508,8 +508,8 @@ class Compressor:
         if self.verbose:
             print(f"[!] Inputs are valid.")
             print(f"[!] Appending {num_sims} simulations to the dataset.")
-        self._dim_params = len(x)
-        self._dim_cond = len(theta)
+        self._dim_sim = len(x)
+        self._dim_params = len(theta)
         self._num_sims = num_sims
 
         # Split the dataset into training, validation and test sets
@@ -634,8 +634,8 @@ class Compressor:
             _ = self._build_neural_network()
 
         exmp_input = (
+            jnp.zeros((1, self._dim_sim)),
             jnp.zeros((1, self._dim_params)),
-            jnp.zeros((1, self._dim_cond)),
         )
 
         if self.verbose:
