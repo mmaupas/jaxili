@@ -4,11 +4,7 @@ import shutil
 import jax
 import jax.numpy as jnp
 import numpy as np
-import numpy.testing as npt
 
-from jaxili.inference.nle import NLE, default_maf_hparams
-from jaxili.model import ConditionalMAF
-from jaxili.compressor import MLPCompressor
 from jaxili.loss import loss_mse
 import flax.linen as nn
 from jaxili.compressor import Compressor
