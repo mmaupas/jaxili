@@ -5,20 +5,20 @@ This module implements an object to perform the training of Normalizing Flows an
 
 import json
 import os
+import fsspec
 import time
 import warnings
 from collections import defaultdict
 from copy import copy, deepcopy
-from typing import Any, Callable, Dict, Iterator, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
 import optax
 import orbax.checkpoint as ocp
-from flax import linen as nn
-from flax.training import checkpoints, orbax_utils, train_state
+import flax.nnx as nnx
 from flax.training.early_stopping import EarlyStopping
-from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
+from flax.metrics import tensorboard
 from tqdm import tqdm
 
 from jaxili.model import NDENetwork
@@ -26,18 +26,6 @@ from jaxili.inventory.func_dict import jax_nn_dict, jaxili_loss_dict, jaxili_nn_
 from jaxili.utils import handle_non_serializable
 
 import datasets as hf_datasets
-
-
-class TrainState(train_state.TrainState):
-    """
-    A simple extension of TrainState to also include batch statistics.
-
-    If a model has no batch statistics, it is None.
-    Keep an rng state for dropout or init.
-    """
-
-    batch_stats: Any = (None,)
-    rng: Any = None
 
 
 class TrainerModule:
@@ -53,13 +41,13 @@ class TrainerModule:
         model_hparams: Dict[str, Any],
         optimizer_hparams: Dict[str, Any],
         loss_fn: Callable,
-        exmp_input: Any,
         seed: int = 42,
         logger_params: Dict[str, Any] = None,
         enable_progress_bar: bool = True,
         debug: bool = False,
         check_val_every_epoch: int = 1,
         nde_class: str = "NPE",
+        verbose: bool = True,
         **kwargs,
     ):
         """
@@ -73,8 +61,6 @@ class TrainerModule:
             A dictionnary of the hyperparameters of the model. Is used as input to the model when it is created.
         optimizer_hparams : Dict[str, Any]
             A dictionnary of the hyperparameters of the optimizer. Used during initialization of the optimizer.
-        exmp_input : Any
-            Input to the model for initialisation and tabulate.
         seed : int
             Seed to initialise PRNG.
         logger_params : Dict[str, Any]
@@ -87,6 +73,8 @@ class TrainerModule:
             How often to check the validation set. Default is 1.
         nde_class : str
             The class of the Neural Density Estimator. Default is "NPE". Only "NPE" and "NLE" are allowed.
+        verbose : bool
+            If True, print information about the training.
         """
         super().__init__()
         self.model_class = model_class
@@ -94,27 +82,24 @@ class TrainerModule:
         self.loss_fn = loss_fn
         self.optimizer_hparams = optimizer_hparams
         self.enable_progress_bar = enable_progress_bar
+        self.verbose = verbose
         self.debug = debug
         self.seed = seed
         self.key_rng = jax.random.PRNGKey(seed)
         self.check_val_every_epoch = check_val_every_epoch
         self.nde_class = nde_class
-        assert (
-            nde_class == "NPE" or nde_class == "NLE"
-        ), "Choose a valid class of Neural Density Estimator. (NPE or NLE)"
-        self.exmp_input = exmp_input
-        if self.nde_class == "NLE":
-            self.exmp_input = (self.exmp_input[1], self.exmp_input[0])
+        assert nde_class == "NPE" or nde_class == "NLE", (
+            "Choose a valid class of Neural Density Estimator. (NPE or NLE)"
+        )
         self.generate_config(logger_params)
         self.config.update(kwargs)
-        # Create an empty model. Note: no parameters yet
+        # Create a model. Contraty to Flax linen, parameters are created at the same time.
         self.model = self.model_class(**self.model_hparams)
-        self.init_apply_fn()
-        self.print_tabulate(self.exmp_input)
+        if self.verbose:
+            nnx.display(self.model)
         # Init trainer parts
         self.init_logger(logger_params)
         self.create_jitted_functions()
-        self.init_model(self.exmp_input)
         # Initialize checkpointer
         self.init_checkpointer()
 
@@ -137,26 +122,86 @@ class TrainerModule:
             log_dir = os.path.join(base_log_dir, self.config["model_class"])
             if "logger_name" in logger_params:
                 log_dir = os.path.join(log_dir, logger_params["logger_name"])
-            version = None
-        else:
-            version = ""
-        # Create logger object
-        logger_type = logger_params.get("logger_type", "TensorBoard").lower()
-        if logger_type == "tensorboard":
-            self.logger = TensorBoardLogger(save_dir=log_dir, version=version, name="")
-        elif logger_type == "wandb":
-            self.logger = WandbLogger(save_dir=log_dir, version=version, name="")
-        else:
-            assert False, f'Unknown logger type "{logger_type}"'
-        # Save hyperparameters
-        log_dir = self.logger.log_dir
-        if not os.path.isfile(os.path.join(log_dir, "hparams.json")):
-            os.makedirs(os.path.join(log_dir, "metrics/"), exist_ok=True)
-            try:
-                self.write_config(log_dir)
-            except:
-                warnings.warn("Could not save hyperparameters.", Warning)
+            # Check the version of the logger
+            os.makedirs(
+                log_dir, exist_ok=True
+            )  # Create the log directory if it does not exist
+            version = logger_params.get("version", None)
+            if version is None:
+                version = self._get_next_version(
+                    log_dir
+                )  # Check if versions ran already and create an appropriate label
+            log_dir = os.path.join(log_dir, version)
+
         self.log_dir = log_dir
+        # Create logger object
+        self.logger = tensorboard.SummaryWriter(log_dir=self.log_dir)
+        # Save hyperparameters
+        if not os.path.isfile(os.path.join(self.log_dir, "hparams.json")):
+            os.makedirs(os.path.join(self.log_dir, "metrics/"), exist_ok=True)
+            try:
+                self.write_config(self.log_dir)
+            except Exception as e:
+                warnings.warn(f"Could not save hyperparameters. Error: {e}", Warning)
+
+    def _get_next_version(self, log_dir: str) -> str:
+        """
+        Get the next version of the logger.
+
+        This function checks the log directory for existing versions and returns the next version number.
+
+        Parameters
+        ----------
+        log_dir : str
+            The directory where the logs are stored.
+
+        Returns
+        -------
+        str
+            The next version number as a string, e.g. "version_0", "version_1", etc.
+        """
+        log_dir = os.fspath(log_dir)
+        fs = fsspec.core.url_to_fs(log_dir)[0]
+        try:
+            listdir_info = fs.listdir(log_dir)
+        except OSError:
+            return 0
+
+        existing_versions = []
+        for listing in listdir_info:
+            d = listing["name"]
+            bn = os.path.basename(d)
+            if fs.isdir(d) and bn.startswith("version_"):
+                dir_ver = bn.split("_")[1].replace("/", "")
+                if dir_ver.isdigit():
+                    existing_versions.append(int(dir_ver))
+        if len(existing_versions) == 0:
+            return "version_0"
+        else:
+            next_version = max(existing_versions) + 1
+            return f"version_{next_version}"
+
+    def log_metrics(self, metrics: Dict[str, Any], step: int = 0):
+        """
+        Log a dictionary of metrics to the logger.
+
+        Parameters
+        ----------
+        metrics : Dict[str, Any]
+            A dictionary of the metrics to log.
+        step : int
+            The step at which to log the metrics. Default is 0.
+        """
+        for key, value in metrics.items():
+            if isinstance(value, (int, float)):
+                self.logger.scalar(key, value, step=step)
+            elif isinstance(value, jnp.ndarray):
+                self.logger.histogram(key, value, step=step)
+            else:
+                warnings.warn(
+                    f"Could not log metric {key} with value {value}. Only int, float and jnp.ndarray are supported.",
+                    Warning,
+                )
 
     def write_config(self, log_dir):
         """Write the config of the trainer in a JSON file."""
@@ -167,38 +212,6 @@ class TrainerModule:
         """Initialize the checkpointer to save the model."""
         options = ocp.CheckpointManagerOptions(max_to_keep=1, create=True)
         self.checkpoint_manager = ocp.CheckpointManager(self.log_dir, options=options)
-
-    def init_model(self, exmp_input: Any):
-        """
-        Create an initial training state with newly generated network parameters.
-
-        Parameters
-        ----------
-        exmp_input : Any
-            An input to the model with which the shapes are inferred.
-        """
-        # Prepare PRNG and input
-        init_rng, self.key_rng = jax.random.split(self.key_rng)
-        exmp_input = (
-            [exmp_input] if not isinstance(exmp_input, (list, tuple)) else exmp_input
-        )
-        # Run model initialization
-        variables = self.run_model_init(exmp_input, init_rng)
-        # Create default state. Optimizer is initialized later
-        model_rng, self.key_rng = jax.random.split(self.key_rng)
-        self.state = TrainState(
-            step=0,
-            apply_fn=self.apply_fn,
-            params=variables["params"],
-            batch_stats=variables.get("batch_stats"),
-            rng=model_rng,
-            tx=None,
-            opt_state=None,
-        )
-
-    def init_apply_fn(self):
-        """Initialize a default apply function for the model."""
-        self.apply_fn = self.model.log_prob
 
     def generate_config(self, logger_params):
         """Generate a configuration dictionary for the trainer."""
@@ -219,37 +232,6 @@ class TrainerModule:
             self.config["model_hparams"]["activation"] = self.model_hparams[
                 "activation"
             ].__name__
-
-    def run_model_init(self, exmp_input: Any, init_rng: Any) -> Dict:
-        """
-        Initialize the model by calling it on the example input.
-
-        Parameters
-        ----------
-        exmp_input : Dict[str, Any]
-            An input to the model with which the shapes are inferred.
-        init_rng : Array
-            A jax.random.PRNGKey
-
-        Returns
-        -------
-            The initialized variable dictionary.
-        """
-        return self.model.init(init_rng, *exmp_input, method="log_prob")
-
-    def print_tabulate(self, exmp_input: Any):
-        """
-        Print a summary of the model represented as a table.
-
-        Parameters
-        ----------
-        exmp_input : Any
-            An input to the model with which the shapes are inferred.
-        """
-        try:
-            print(self.model.tabulate(jax.random.PRNGKey(0), *exmp_input))
-        except Exception as e:
-            print(f"Could not tabulate model: {e}")
 
     def init_optimizer(self, num_epochs: int, num_steps_per_epoch: int):
         """
@@ -292,19 +274,13 @@ class TrainerModule:
         )
         # Clip gradients at max value, and evt. apply weight decay
         transf = [optax.clip_by_global_norm(hparams.pop("gradient_clip", 5.0))]
-        if opt_class == optax.sgd and "weight_decay" in hparams:
+        if opt_class in [optax.sgd, optax.adamw] and "weight_decay" in hparams:
             transf.append(optax.add_decayed_weights(hparams.pop("weight_decay", 0.0)))
         hparams.pop(
             "weight_decay", None
         )  # removes weight decay if the opt_class is not sgd.
-        optimizer = optax.chain(*transf, opt_class(lr_schedule, **hparams))
-        # Initialize training state
-        self.state = TrainState.create(
-            apply_fn=self.state.apply_fn,
-            params=self.state.params,
-            batch_stats=self.state.batch_stats,
-            tx=optimizer,
-            rng=self.state.rng,
+        self.optimizer = nnx.Optimizer(
+            self.model, optax.chain(*transf, opt_class(lr_schedule, **hparams))
         )
 
     def create_jitted_functions(self):
@@ -319,14 +295,14 @@ class TrainerModule:
             self.train_step = train_step
             self.eval_step = eval_step
         else:
-            self.train_step = jax.jit(train_step)
-            self.eval_step = jax.jit(eval_step)
+            self.train_step = nnx.jit(train_step)
+            self.eval_step = nnx.jit(eval_step)
 
     def create_functions(
         self,
     ) -> Tuple[
-        Callable[[TrainState, Any], Tuple[TrainState, Dict]],
-        Callable[[TrainState, Any], Tuple[TrainState, Dict]],
+        Callable[[Any, Any, Any], Tuple[Dict]],
+        Callable[[Any, Any], Tuple[Dict]],
     ]:
         """
         Create and returns functions for the training and evaluation step.
@@ -335,15 +311,14 @@ class TrainerModule:
         Both functions are expected to return a dictionary of logging metrics, and the training function a new train state. This function can be overwritten by a subclass. The train_step and eval_step functions here are examples for the signature of the functions.
         """
 
-        def train_step(state: TrainState, batch: Any):
-            loss_fn = lambda params: self.loss_fn(self.model, params, batch)
-            loss, grads = jax.value_and_grad(loss_fn)(state.params)
-            state = state.apply_gradients(grads=grads)
+        def train_step(model: Any, optimizer: Any, batch: Any):
+            loss, grads = nnx.value_and_grad(self.loss_fn)(model, batch)
+            optimizer.update(grads)
             metrics = {"loss": loss}
-            return state, metrics
+            return metrics
 
-        def eval_step(state: TrainState, batch: Any):
-            loss = self.loss_fn(self.model, state.params, batch)
+        def eval_step(model: Any, batch: Any):
+            loss = self.loss_fn(model, batch)
             metrics = {"loss": loss}
             return metrics
 
@@ -357,6 +332,7 @@ class TrainerModule:
         num_epochs: int = 500,
         min_delta: float = 1e-3,
         patience: int = 20,
+        load_best: bool = True,
     ) -> Dict[str, Any]:
         """
         Start a training loop for the given number of epochs.
@@ -375,6 +351,8 @@ class TrainerModule:
             Minimum change in the monitored metric to qualify as an improvement.
         patience : int
             Number of epochs with no improvement after which training will be stopped. Default is 20.
+        load_best : bool
+            If True, loads the best epoch on the validation set. (Default: True)
 
         Returns
         -------
@@ -391,23 +369,24 @@ class TrainerModule:
         pbar = self.tracker(range(1, num_epochs + 1), desc="Epochs")
         for epoch_idx in pbar:
             train_metrics = self.train_epoch(train_loader)
-            self.logger.log_metrics(train_metrics, step=epoch_idx)
+            self.log_metrics(train_metrics, step=epoch_idx)
             self.on_training_epoch_end(epoch_idx)
             # Validation every N epochs
             if epoch_idx % self.check_val_every_epoch == 0:
                 eval_metrics = self.eval_model(val_loader, log_prefix="val/")
                 self.on_validation_epoch_end(epoch_idx, eval_metrics, val_loader)
-                self.logger.log_metrics(eval_metrics, step=epoch_idx)
+                self.log_metrics(eval_metrics, step=epoch_idx)
                 self.save_metrics(f"eval_epoch_{str(epoch_idx).zfill(3)}", eval_metrics)
+                early_stop = early_stop.update(eval_metrics["val/loss"])
                 # Save best model
-                if self.is_new_model_better(eval_metrics, best_eval_metrics):
+                if early_stop.has_improved:
                     best_eval_metrics = eval_metrics
                     best_eval_metrics.update(train_metrics)
                     best_epoch = epoch_idx
                     self.save_model(step=epoch_idx)
                     self.save_metrics("best_eval", best_eval_metrics)
-                early_stop = early_stop.update(eval_metrics["val/loss"])
-                if early_stop.should_stop:
+
+                if early_stop.should_stop and self.verbose:
                     print(f"Neural network training stopped after {epoch_idx} epochs.")
                     print(
                         f"Early stopping with best validation metric: {early_stop.best_metric}"
@@ -419,17 +398,18 @@ class TrainerModule:
                     break
                 if self.enable_progress_bar:
                     pbar.set_description(
-                        f"Epochs: Val loss {eval_metrics['val/loss']:.3f}/ Best val loss {early_stop.best_metric:.3f}"
+                        f"Epochs: Val loss {eval_metrics['val/loss']:.5g}/ Best val loss {early_stop.best_metric:.5g}"
                     )
         # Test best model if possible
         if test_loader is not None:
-            self.load_model()
+            if load_best:
+                self.load_model()
             test_metrics = self.eval_model(test_loader, log_prefix="test/")
-            self.logger.log_metrics(test_metrics, step=epoch_idx)
+            self.log_metrics(test_metrics, step=epoch_idx)
             self.save_metrics("test", test_metrics)
             best_eval_metrics.update(test_metrics)
         # Close logger
-        self.logger.finalize("success")
+        self.logger.close()
         return best_eval_metrics
 
     def train_epoch(self, train_loader: Iterator) -> Dict[str, Any]:
@@ -460,7 +440,7 @@ class TrainerModule:
         for batch in train_loader:
             if hf_dataset:
                 batch = self.handle_hf_dataset(batch)
-            self.state, step_metrics = self.train_step(self.state, batch)
+            step_metrics = self.train_step(self.model, self.optimizer, batch)
             for key in step_metrics:
                 metrics["train/" + key] += step_metrics[key] / num_train_steps
         metrics = {key: metrics[key].item() for key in metrics}
@@ -498,7 +478,7 @@ class TrainerModule:
         for batch in data_loader:
             if hf_dataset:
                 batch = self.handle_hf_dataset(batch)
-            step_metrics = self.eval_step(self.state, batch)
+            step_metrics = self.eval_step(self.model, batch)
             batch_size = (
                 batch[0].shape[0]
                 if isinstance(batch, (list, tuple))
@@ -648,21 +628,16 @@ class TrainerModule:
         step : int
             Index of the step to save the model at, e.g. epoch.
         """
-        target = {"params": self.state.params, "batch_stats": self.state.batch_stats}
-        self.checkpoint_manager.save(step, args=ocp.args.StandardSave(target))
+        _, state = nnx.split(self.model)
+        self.checkpoint_manager.save(step, args=ocp.args.StandardSave(state))
         self.checkpoint_manager.wait_until_finished()
 
     def load_model(self):
         """Load model and batch statistics from the logging directory."""
         step = self.checkpoint_manager.latest_step()
         state_dict = self.checkpoint_manager.restore(step)
-        self.state = TrainState.create(
-            apply_fn=self.apply_fn,
-            params=state_dict["params"],
-            batch_stats=state_dict["batch_stats"],
-            tx=self.state.tx if self.state.tx else optax.sgd(0.1),
-            rng=self.state.rng,
-        )
+        graphdef, _ = nnx.split(self.model)
+        self.model = nnx.merge(graphdef, state_dict)
 
     def bind_model(self):
         """
@@ -672,15 +647,13 @@ class TrainerModule:
         -------
         The model with parameters and evt. batch statistics bound to it.
         """
-        params = {"params": self.state.params}
-        if self.state.batch_stats:
-            params["batch_stats"] = self.state.batch_stats
-        return self.model.bind(params)
+        warnings.warn(
+            "This function is deprecated since the transition form Flax linen to Flax NNX. The model is bind by default now.",
+            DeprecationWarning,
+        )
 
     @classmethod
-    def load_from_checkpoints(
-        cls, model_class: NDENetwork, checkpoint: str, exmp_input: Any
-    ) -> Any:
+    def load_from_checkpoints(cls, model_class: NDENetwork, checkpoint: str) -> Any:
         """
         Create a Trainer object with same hyperparameters and loaded model from a checkpoint directory.
 
@@ -690,8 +663,6 @@ class TrainerModule:
             The class of the model that should be loaded.
         checkpoint : str
             Folder in which the checkpoint and hyperparameter file is stored
-        exmp_input : Any
-            An input to the model with which the shapes are inferred.
 
         Returns
         -------
@@ -701,14 +672,14 @@ class TrainerModule:
         assert os.path.isfile(hparams_file), "Could not find hparams file."
         with open(hparams_file, "r") as f:
             hparams = json.load(f)
-        assert (
-            hparams["model_class"] == model_class.__name__
-        ), "Model class does not match. Check that you are using the correct architecture."
+        assert hparams["model_class"] == model_class.__name__, (
+            "Model class does not match. Check that you are using the correct architecture."
+        )
         hparams.pop("model_class")
         # Check if an activation function is used as a hyperparameter if the neural network.
-        assert (
-            hparams["loss_fn"] in jaxili_loss_dict
-        ), "Unknown loss function. Check that the loss function you used comes from `jax.nn`."
+        assert hparams["loss_fn"] in jaxili_loss_dict, (
+            "Unknown loss function. Check that the loss function you used comes from `jax.nn`."
+        )
         hparams["loss_fn"] = jaxili_loss_dict[hparams["loss_fn"]]
         if "activation" in hparams["model_hparams"].keys():
             hparams["model_hparams"]["activation"] = jax_nn_dict[
@@ -721,6 +692,6 @@ class TrainerModule:
         if not hparams["logger_params"]:
             hparams["logger_params"] = dict()
         hparams["logger_params"]["log_dir"] = checkpoint
-        trainer = cls(model_class=model_class, exmp_input=exmp_input, **hparams)
+        trainer = cls(model_class=model_class, **hparams)
         trainer.load_model()
         return trainer

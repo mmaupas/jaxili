@@ -4,7 +4,7 @@ MCMC Posterior.
 This module contains the MCMCPosterior class that wraps the NeuralPosterior class to perform MCMC sampling.
 """
 
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 import jax
 import jax.numpy as jnp
@@ -20,7 +20,6 @@ from numpyro.infer.util import init_to_value
 
 from jaxili.model import NDENetwork
 from jaxili.posterior import NeuralPosterior
-from jaxili.train import TrainState
 
 implemented_method = ["nuts_numpyro", "hmc_numpyro"]
 
@@ -40,7 +39,6 @@ class MCMCPosterior(NeuralPosterior):
     def __init__(
         self,
         model: NDENetwork,
-        state: TrainState,
         prior_distr: dist.Distribution,
         verbose: Optional[bool] = False,
         x: Optional[Array] = None,
@@ -54,8 +52,6 @@ class MCMCPosterior(NeuralPosterior):
         ----------
         model : NDENetwork
             The neural network used to generate the posterior.
-        state : TrainState
-            The state of the neural network.
         prior_distr : ...
             The prior distribution of the parameters. (One must specify a prior to perform MCMC sampling.)
         verbose : bool
@@ -67,7 +63,7 @@ class MCMCPosterior(NeuralPosterior):
         mcmc_kwargs : dict
             The keyword arguments for the MCMC method. (Default: hmc_numpyro_kwargs_default)
         """
-        super().__init__(model, state, verbose, x)
+        super().__init__(model, verbose, x)
         self.set_mcmc_method(mcmc_method)
         self.set_mcmc_kwargs(mcmc_kwargs)
         if self.verbose:
@@ -96,8 +92,8 @@ class MCMCPosterior(NeuralPosterior):
         if x is None:
             try:
                 x = self.x
-            except:
-                raise ValueError(
+            except AttributeError:
+                raise AttributeError(
                     "The data x must be specified or loaded in the posterior with `set_default_x()`."
                 )
         self.mcmc_kwargs.update({"num_samples": num_samples})
@@ -154,10 +150,7 @@ class MCMCPosterior(NeuralPosterior):
         Array
             The unnormalized log probability.
         """
-        params = self.state.params
-        log_likelihood = self.model.apply(
-            {"params": params}, x, theta, method="log_prob"
-        ).squeeze()
+        log_likelihood = self.model.log_prob(x, theta).squeeze()
         return log_likelihood
 
     def unnormalized_log_prob(self, theta: Array, x: Optional[Array] = None):
@@ -196,7 +189,7 @@ class MCMCPosterior(NeuralPosterior):
         def model(data):
             theta = numpyro.sample("theta", self.prior_distr)
 
-            z = numpyro.deterministic("z", theta)
+            _ = numpyro.deterministic("z", theta)
 
             likelihood = self.log_likelihood(x, theta.reshape((1, theta.shape[0])))
 

@@ -4,7 +4,6 @@ import shutil
 import jax
 import jax.numpy as jnp
 import jax_dataloader as jdl
-import numpy as np
 
 from jaxili.utils import create_data_loader
 from jaxili.train import TrainerModule
@@ -96,11 +95,11 @@ def test_checkpoint_maf():
     )
 
     # Train the Neural Density Estimator
-    metrics_maf_npe = trainer_maf_npe.train_model(
+    _ = trainer_maf_npe.train_model(
         train_loader, val_loader, test_loader=test_loader, num_epochs=500, patience=20
     )
 
-    model_maf_npe = trainer_maf_npe.bind_model()
+    model_maf_npe = trainer_maf_npe.model
 
     sample_key = jax.random.PRNGKey(0)
     samples_maf_npe = model_maf_npe.sample(obs, num_samples=10000, key=sample_key)
@@ -109,10 +108,9 @@ def test_checkpoint_maf():
     trainer_maf_npe = TrainerModule.load_from_checkpoints(
         model_class=ConditionalMAF,
         checkpoint=CHECKPOINT_PATH + "/ConditionalMAF/version_0/",
-        exmp_input=next(iter(train_loader)),
     )
 
-    model_maf_npe = trainer_maf_npe.bind_model()
+    model_maf_npe = trainer_maf_npe.model
 
     samples_maf_npe_ckpt = model_maf_npe.sample(obs, num_samples=10000, key=sample_key)
 
@@ -138,7 +136,6 @@ def test_checkpoints_npe():
 
     inference = NPE.load_from_checkpoints(
         checkpoint=CHECKPOINT_PATH + "/NDE_w_Standardization/version_0/",
-        exmp_input=next(iter(train_loader)),
     )
 
     posterior = inference.build_posterior()

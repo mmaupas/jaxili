@@ -6,7 +6,6 @@ This module provides the Neural Posterior Estimation (NPE) class to train a neur
 
 import os
 import json
-import re
 import warnings
 import copy
 from typing import Any, Callable, Dict, Iterable, Optional, Union
@@ -17,8 +16,9 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import jax_dataloader as jdl
+import flax.nnx as nnx
 import numpy as np
-from jaxtyping import Array, Float, PyTree
+from jaxtyping import Array, PyTree
 
 import jaxili
 from jaxili.loss import loss_nll_npe
@@ -31,11 +31,12 @@ from jaxili.model import (
 from jaxili.compressor import Identity, Standardizer
 from jaxili.posterior import DirectPosterior
 from jaxili.train import TrainerModule
-from jaxili.utils import *
 from jaxili.utils import (
-    check_density_estimator,
     create_data_loader,
     validate_theta_x,
+    check_hparams_maf,
+    check_hparams_realnvp,
+    check_hparams_mdn,
 )
 from jaxili.inventory.func_dict import jaxili_loss_dict, jax_nn_dict, jaxili_nn_dict
 
@@ -47,6 +48,7 @@ default_maf_hparams = {
     "activation": jax.nn.relu,
     "use_reverse": True,
     "seed": 42,
+    "rngs": nnx.Rngs(0),
 }
 
 
@@ -158,11 +160,11 @@ class NPE:
         ], "Type should be 'train', 'val' or 'test'."
 
         if type == "train":
-            self._train_dataloader = dataloader
+            self._train_loader = dataloader
         elif type == "val":
-            self._val_dataloader = dataloader
+            self._val_loader = dataloader
         elif type == "test":
-            self._test_dataloader = dataloader
+            self._test_loader = dataloader
 
     def append_simulations(
         self,
@@ -191,7 +193,7 @@ class NPE:
         # Verify theta and x typing and size of the dataset
         theta, x, num_sims = validate_theta_x(theta, x)
         if self.verbose:
-            print(f"[!] Inputs are valid.")
+            print("[!] Inputs are valid.")
             print(f"[!] Appending {num_sims} simulations to the dataset.")
 
         self._dim_params = theta.shape[1]
@@ -202,14 +204,14 @@ class NPE:
         is_test_set = len(train_test_split) == 3
         if is_test_set:
             train_fraction, val_fraction, test_fraction = train_test_split
-            assert np.isclose(
-                train_fraction + val_fraction + test_fraction, 1.0
-            ), "The sum of the split fractions should be 1."
+            assert np.isclose(train_fraction + val_fraction + test_fraction, 1.0), (
+                "The sum of the split fractions should be 1."
+            )
         elif len(train_test_split) == 2:
             train_fraction, val_fraction = train_test_split
-            assert np.isclose(
-                train_fraction + val_fraction, 1.0
-            ), "The sum of the split fractions should be 1."
+            assert np.isclose(train_fraction + val_fraction, 1.0), (
+                "The sum of the split fractions should be 1."
+            )
         else:
             raise ValueError("train_test_split should have 2 or 3 elements.")
 
@@ -236,18 +238,18 @@ class NPE:
         )
 
         if self.verbose:
-            print(f"[!] Dataset split into training, validation and test sets.")
+            print("[!] Dataset split into training, validation and test sets.")
             print(f"[!] Training set: {len(train_idx)} simulations.")
             print(f"[!] Validation set: {len(val_idx)} simulations.")
             if is_test_set:
                 print(f"[!] Test set: {len(test_idx)} simulations.")
         return self
-    
+
     def append_simulations_huggingface(
-            self,
-            hf_dataset: hf_datasets.Dataset,
-            train_test_split: Iterable[float] = [0.7, 0.2, 0.1],
-            key: Optional[PyTree] = None
+        self,
+        hf_dataset: hf_datasets.Dataset,
+        train_test_split: Iterable[float] = [0.7, 0.2, 0.1],
+        key: Optional[PyTree] = None,
     ):
         """
         Store parameters and simulation outputs to use them for later training.
@@ -264,15 +266,19 @@ class NPE:
         key : PyTree, optional
             Key to use for the random permutation of the dataset. Default is None.
         """
-        #check if the hugging face dataset has the correct form
-        if ('x' not in hf_dataset.features.keys()) or ('theta' not in hf_dataset.features.keys()):
-            raise ValueError("The hugging face dataset should have columns 'theta' and 'x'")
-    
-        theta, x = hf_dataset['theta'][0], hf_dataset['x'][0]
-        #theta, x, _ = validate_theta_x(theta, x)
+        # check if the hugging face dataset has the correct form
+        if ("x" not in hf_dataset.features.keys()) or (
+            "theta" not in hf_dataset.features.keys()
+        ):
+            raise ValueError(
+                "The hugging face dataset should have columns 'theta' and 'x'"
+            )
+
+        theta, x = hf_dataset[0]["theta"], hf_dataset[0]["x"]
+        # theta, x, _ = validate_theta_x(theta, x)
         num_sims = hf_dataset.num_rows
         if self.verbose:
-            print(f"[!] Inputs are valid.")
+            print("[!] Inputs are valid.")
             print(f"[!] Appending {num_sims} simulations to the dataset.")
         self._dim_params = len(theta)
         self._dim_cond = len(x)
@@ -282,22 +288,24 @@ class NPE:
         is_test_set = len(train_test_split) == 3
         if is_test_set:
             train_fraction, val_fraction, test_fraction = train_test_split
-            assert np.isclose(
-                train_fraction + val_fraction + test_fraction, 1.0
-            ), "The sum of the split fractions should be 1."
+            assert np.isclose(train_fraction + val_fraction + test_fraction, 1.0), (
+                "The sum of the split fractions should be 1."
+            )
         elif len(train_test_split) == 2:
             train_fraction, val_fraction = train_test_split
-            assert np.isclose(
-                train_fraction + val_fraction, 1.0
-            ), "The sum of the split fractions should be 1."
+            assert np.isclose(train_fraction + val_fraction, 1.0), (
+                "The sum of the split fractions should be 1."
+            )
         else:
             raise ValueError("train_test_split should have 2 or 3 elements.")
-        
+
         if not is_test_set:
-            test_fraction=0.
-        hf_dataset = hf_dataset.train_test_split(test_size=val_fraction+test_fraction)
+            test_fraction = 0.0
+        hf_dataset = hf_dataset.train_test_split(test_size=val_fraction + test_fraction)
         if is_test_set:
-            temp_dataset = hf_dataset["test"].train_test_split(test_size=val_fraction/(val_fraction+test_fraction))
+            temp_dataset = hf_dataset["test"].train_test_split(
+                test_size=val_fraction / (val_fraction + test_fraction)
+            )
             hf_dataset["val"] = temp_dataset["train"]
             hf_dataset["test"] = temp_dataset["test"]
             del temp_dataset
@@ -309,11 +317,11 @@ class NPE:
         )
 
         if self.verbose:
-            print(f"[!] Dataset split into training, validation and test sets.")
-            print(f"[!] Training set: {hf_dataset["train"].num_rows} simulations.")
-            print(f"[!] Validation set: {hf_dataset["test"].num_rows} simulations.")
+            print("[!] Dataset split into training, validation and test sets.")
+            print(f"[!] Training set: {hf_dataset['train'].num_rows} simulations.")
+            print(f"[!] Validation set: {hf_dataset['test'].num_rows} simulations.")
             if is_test_set:
-                print(f"[!] Test set: {hf_dataset["val"].num_rows} simulations.")
+                print(f"[!] Test set: {hf_dataset['val'].num_rows} simulations.")
         return self
 
     def _create_data_loader(self, **kwargs):
@@ -441,6 +449,9 @@ class NPE:
             del train_dataset_x
             scale = scale.at[scale < min_std].set(min_std)
             standardizer = Standardizer(shift, scale)
+            self._standardizer_hparams = {}
+            self._standardizer_hparams["shift"] = shift
+            self._standardizer_hparams["scale"] = scale
         else:
             standardizer = Identity()
 
@@ -455,7 +466,7 @@ class NPE:
             else:
                 embedding_net = embedding_net(**embedding_hparams)
 
-        self._embedding_net = nn.Sequential([standardizer, embedding_net])
+        self._embedding_net = nnx.Sequential(standardizer, embedding_net)
 
         if isinstance(embedding_net, Identity):
             n_cond = self._dim_cond
@@ -469,7 +480,8 @@ class NPE:
         model = NDE_w_Standardization(
             nde=self._nde,
             embedding_net=self._embedding_net,
-            transformation=self._transformation,
+            shift_transformation=self._transformation_hparams["shift"],
+            scale_transformation=self._transformation_hparams["scale"],
         )
 
         return model
@@ -492,8 +504,6 @@ class NPE:
             Hyperparameters to use for the optimizer.
         loss_fn : Callable
             Loss function to use for training.
-        exmp_input : Any
-            Example input to use for the model.
         seed : int, optional
             Seed to use for the trainer. Default is 42.
         logger_params : Dict[str, Any], optional
@@ -503,13 +513,13 @@ class NPE:
         check_val_every_epoch : int, optional
             Frequency at which to check the validation loss. Default is 1.
         """
+        z_score_theta = kwargs.get("z_score_theta", True)
+        z_score_x = kwargs.get("z_score_x", True)
+        embedding_net = kwargs.get("embedding_net", Identity)
+        embedding_net_hparams = kwargs.get("embedding_hparams", None)
         try:
             self._nde
         except AttributeError:
-            z_score_theta = kwargs.get("z_score_theta", True)
-            z_score_x = kwargs.get("z_score_x", True)
-            embedding_net = kwargs.get("embedding_net", Identity)
-            embedding_net_hparams = kwargs.get("embedding_hparams", None)
             _ = self._build_neural_network(
                 z_score_theta=z_score_theta,
                 z_score_x=z_score_x,
@@ -520,10 +530,9 @@ class NPE:
         nde_w_std_hparams = {
             "nde": self._nde,
             "embedding_net": self._embedding_net,
-            "transformation": self._transformation,
+            "shift_transformation": self._transformation_hparams["shift"],
+            "scale_transformation": self._transformation_hparams["scale"],
         }
-
-        exmp_input = (jnp.zeros((1, self._dim_params)), jnp.zeros((1, self._dim_cond)))
 
         if self.verbose:
             print("[!] Creating the Trainer module.")
@@ -533,14 +542,13 @@ class NPE:
             model_hparams=nde_w_std_hparams,
             optimizer_hparams=optimizer_hparams,
             loss_fn=self._loss_fn,
-            exmp_input=exmp_input,
             seed=seed,
             logger_params=logger_params,
             enable_progress_bar=self.verbose,
             debug=debug,
             check_val_every_epoch=check_val_every_epoch,
         )
-
+        self.trainer.config.update({"nde_class": self._model_class.__name__})
         self.trainer.config.update({"nde_hparams": copy.deepcopy(self._model_hparams)})
         # Check if there is an activation function to rename
         if "activation" in self._model_hparams.keys():
@@ -550,6 +558,11 @@ class NPE:
         self.trainer.config.update(
             {"transformation_hparams": copy.deepcopy(self._transformation_hparams)}
         )
+        if z_score_x:
+            self.trainer.config.update(
+                {"standardizer_hparams": copy.deepcopy(self._standardizer_hparams)}
+            )
+        self.trainer.config.update({"embedding_class": embedding_net.__name__})
         if embedding_net_hparams is not None:
             self.trainer.config.update(
                 {"embedding_hparams": copy.deepcopy(embedding_net_hparams)}
@@ -616,7 +629,9 @@ class NPE:
 
         # Create the dataloaders to perform the training
         try:
-            self._train_loader
+            batch_size = self._train_loader.dataloader.batch_size
+            if batch_size != training_batch_size:
+                self._create_data_loader(batch_size=training_batch_size)
         except AttributeError:
             self._create_data_loader(batch_size=training_batch_size)
 
@@ -675,7 +690,7 @@ class NPE:
             if self._test_loader is not None:
                 print(f"[!] Test loss: {metrics['test/loss']}")
 
-        density_estimator = self.trainer.bind_model()
+        density_estimator = self.trainer.model
         return metrics, density_estimator
 
     def build_posterior(
@@ -701,9 +716,7 @@ class NPE:
 
         if verbose is None:
             verbose = self.verbose
-        posterior = DirectPosterior(
-            model=self.trainer.model, state=self.trainer.state, verbose=verbose, x=x
-        )
+        posterior = DirectPosterior(model=self.trainer.model, verbose=verbose, x=x)
 
         if self.verbose:
             print(
@@ -714,7 +727,7 @@ class NPE:
 
     @classmethod
     def load_from_checkpoints(
-        cls, checkpoint: str, exmp_input: Any, embedding_net_class=Identity
+        cls, checkpoint: str, embedding_net_class=Identity
     ) -> Any:
         """
         Create a NPE object where the TrainerModule is loading the already existing weights for the neural network.
@@ -722,11 +735,9 @@ class NPE:
         Parameters
         ----------
         nde_class: NDENetwork
-            Class used to create the neural density estimator
+            Class used to create the neural density estimator.
         checkpoint: str
-            Folder in which the checkpoint and hyperparameter file is stored
-        exmp_input : Any
-            An input to the model with which the shapes are inferred.
+            Folder in which the checkpoint and hyperparameter file is stored.
         embedding_net_class: nn.Module
             Class used to create the embedding net. (Default: Identity)
 
@@ -738,43 +749,31 @@ class NPE:
         assert os.path.isfile(hparams_file), "Could not find hparams file."
         with open(hparams_file, "r") as f:
             hparams = json.load(f)
-        assert (
-            hparams["model_class"] == NDE_w_Standardization.__name__
-        ), "The model has not been trained with NDE_w_Standardization. Check the checkpoint path is correct."
+        assert hparams["model_class"] == NDE_w_Standardization.__name__, (
+            "The model has not been trained with NDE_w_Standardization. Check the checkpoint path is correct."
+        )
         hparams.pop("model_class")
 
-        # Check that the embedding class name is correct.
-        embedding_str = hparams["model_hparams"]["embedding_net"]
-        # Find all class names in the layers list
-        class_names = re.findall(r"(\w+)\s*\(", embedding_str)
-
-        # The first entry is "Sequential", so we take the next two
-        embedding_classes = [
-            class_ for class_ in class_names[1:] if class_ != "Array"
-        ]  # Skip "Sequential"
-        assert (
-            embedding_classes[1] == embedding_net_class.__name__
-        ), "The embedding class does not match. Check that you are using the correct architecture."
+        embedding_class = hparams["embedding_class"]
+        assert embedding_class == embedding_net_class.__name__, (
+            "The embedding class does not match. Check that you are using the correct architecture."
+        )
 
         # Check if the loss function is correct.
-        assert (
-            hparams["loss_fn"] in jaxili_loss_dict
-        ), "Unknown loss function. Check that the loss function you used comes from `jax.nn`."
+        assert hparams["loss_fn"] in jaxili_loss_dict, (
+            "Unknown loss function. Check that the loss function you used comes from `jax.nn`."
+        )
         hparams["loss_fn"] = jaxili_loss_dict[hparams["loss_fn"]]
         # Create the NDE
         # Extract the nde string
-        nde_str = hparams["model_hparams"]["nde"]
-
-        # Use regex to extract the class name
-        nde_class_match = re.match(r"(\w+)\s*\(", nde_str)
-
-        # Get the class name
-        nde_class_name = nde_class_match.group(1) if nde_class_match else None
+        nde_class_name = hparams["nde_class"]
+        hparams.pop("nde_class")
 
         nde_class = jaxili_nn_dict[nde_class_name]
         nde_hparams = hparams["nde_hparams"]
         if "activation" in nde_hparams.keys():
             nde_hparams["activation"] = jax_nn_dict[nde_hparams["activation"]]
+        nde_hparams["rngs"] = nnx.Rngs(0)
 
         # Create object from the class NPE
         inference = cls(
@@ -785,34 +784,21 @@ class NPE:
         inference._nde = nde_class(**nde_hparams)
 
         # Regenerate the embedding net
-        if embedding_classes[0] == "Identity":
+        standardizer_hparams = hparams.get("standardizer_hparams", None)
+        if standardizer_hparams is None:
             standardizer = Identity()
-        elif embedding_classes[0] == "Standardizer":
-            embedding_net_str = hparams["model_hparams"]["embedding_net"]
-
-            # Regular expressions to extract mean and std arrays
-            mean_match = re.search(r"mean\s*=\s*Array\((\[.*?\])", embedding_net_str)
-            std_match = re.search(r"std\s*=\s*Array\((\[.*?\])", embedding_net_str)
-
-            # Convert extracted values into NumPy arrays
-            mean_array = (
-                np.fromstring(mean_match.group(1).strip("[]"), sep=", ")
-                if mean_match
-                else None
-            )
-            std_array = (
-                np.fromstring(std_match.group(1).strip("[]"), sep=", ")
-                if std_match
-                else None
-            )
-
-            standardizer = Standardizer(mean=mean_array, std=std_array)
         else:
-            raise ValueError(
-                "The first class of the embedding net should be `Identity` or `Standardizer`."
+            shift_str = standardizer_hparams["shift"]
+            shift_list = [float(x) for x in shift_str.strip("[]").split()]
+
+            scale_str = standardizer_hparams["scale"]
+            scale_list = [float(x) for x in scale_str.strip("[]").split()]
+
+            standardizer = Standardizer(
+                mean=np.array(shift_list), std=np.array(scale_list)
             )
 
-        if embedding_classes[1] != "Identity":
+        if embedding_class != "Identity":
             if "embedding_hparams" not in hparams.keys():
                 raise ValueError(
                     "The embedding net hyperparameters can't be find. Check that you are using the correct checkpoint path."
@@ -825,7 +811,7 @@ class NPE:
         else:
             embedding_net = Identity()
 
-        inference._embedding_net = nn.Sequential(layers=[standardizer, embedding_net])
+        inference._embedding_net = nnx.Sequential(standardizer, embedding_net)
 
         # Regenerate the transformation of the parameters
         shift_str = hparams["transformation_hparams"]["shift"]
@@ -841,7 +827,8 @@ class NPE:
         model_hparams = {
             "nde": inference._nde,
             "embedding_net": inference._embedding_net,
-            "transformation": inference._transformation,
+            "shift_transformation": inference._transformation.shift,
+            "scale_transformation": inference._transformation.scale,
         }
 
         if not hparams["logger_params"]:
@@ -851,7 +838,6 @@ class NPE:
 
         inference.trainer = TrainerModule(
             model_class=NDE_w_Standardization,
-            exmp_input=exmp_input,
             model_hparams=model_hparams,
             **hparams,
         )
